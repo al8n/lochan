@@ -118,6 +118,7 @@ impl<T> Future for Send<'_, T> {
 }
 
 impl<T> FusedFuture for Send<'_, T> {
+  #[inline(always)]
   fn is_terminated(&self) -> bool {
     self.done
   }

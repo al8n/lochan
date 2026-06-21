@@ -67,6 +67,7 @@ impl<T> Future for Recv<'_, T> {
 }
 
 impl<T> FusedFuture for Recv<'_, T> {
+  #[inline(always)]
   fn is_terminated(&self) -> bool {
     self.done
   }

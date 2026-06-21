@@ -204,6 +204,7 @@ impl<T> Future for Receiver<T> {
 }
 
 impl<T> FusedFuture for Receiver<T> {
+  #[inline(always)]
   fn is_terminated(&self) -> bool {
     self.done
   }
