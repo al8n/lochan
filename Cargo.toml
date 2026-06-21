@@ -1,17 +1,19 @@
 [package]
-name = "template-rs"
-version = "0.0.0"
+name = "lochan"
+version = "0.1.0"
 edition = "2021"
-repository = "https://github.com/al8n/template-rs"
-homepage = "https://github.com/al8n/template-rs"
-documentation = "https://docs.rs/template-rs"
-description = "A template for creating Rust open-source repo on GitHub"
+rust-version = "1.82"
+repository = "https://github.com/al8n/lochan"
+homepage = "https://github.com/al8n/lochan"
+documentation = "https://docs.rs/lochan"
+description = "Single-threaded (!Send), no_std, no-atomics async channels for thread-per-core runtimes: mpsc and oneshot, with non-blocking (try_*) and awaitable APIs."
 license = "MIT OR Apache-2.0"
-rust-version = "1.73"
+keywords = ["channel", "mpsc", "oneshot", "async", "no-std"]
+categories = ["asynchronous", "concurrency", "no-std", "data-structures"]
 
 [[bench]]
-path = "benches/foo.rs"
-name = "foo"
+path = "benches/channels.rs"
+name = "channels"
 harness = false
 
 [features]
@@ -20,10 +22,13 @@ alloc = []
 std = []
 
 [dependencies]
+futures-core = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8"
-tempfile = "3"
+futures = { version = "0.3", features = ["executor"] }
+local-channel = "0.1"
+local-sync = "0.1"
 
 [profile.bench]
 opt-level = 3
@@ -39,7 +44,10 @@ rpath = false
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
-[lints.rust]
+[lints]
+workspace = true
+
+[workspace.lints.rust]
 rust_2018_idioms = "warn"
 single_use_lifetimes = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = [

@@ -35,4 +35,6 @@ cargo miri setup
 
 export MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-alignment-check -Zmiri-tree-borrows"
 
-cargo miri test --all-targets --target "$TARGET"
+# Lib unit tests + integration tests only — benchmarks exercise external crates
+# (local-sync, local-channel), not lochan's own correctness.
+cargo miri test --lib --tests --target "$TARGET"
