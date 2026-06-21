@@ -145,6 +145,11 @@ impl<T> Chan<T> {
   }
 
   pub(super) fn wake_receiver(&self) {
+    // Fast path: the receiver is not parked (it is actively draining, or this is a
+    // producer still buffering) — nothing to wake. Skips the take + write-back.
+    if self.recv_waker.borrow().is_none() {
+      return;
+    }
     // Take the waker out and drop the borrow BEFORE waking: a synchronous waker may
     // re-enter and register again, which would double-borrow `recv_waker`.
     let waker = self.recv_waker.borrow_mut().take();
@@ -199,6 +204,12 @@ impl<T> Chan<T> {
   }
 
   pub(super) fn wake_senders(&self) {
+    // Fast path: no parked sender to wake — always the case for an unbounded channel,
+    // and for a bounded one that is not full. Skips the take + guard below, which are
+    // pure overhead on the hot recv path.
+    if self.send_wakers.borrow().is_empty() {
+      return;
+    }
     // Move the buffer out — dropping the borrow BEFORE waking, since a waker may
     // re-enter and re-borrow `send_wakers` — then wake every parked sender even if one
     // waker panics: a panicking wake must not strand the others (their futures would

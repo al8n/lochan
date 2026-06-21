@@ -76,14 +76,16 @@ provides only an unbounded `mpsc`.
 
 | benchmark (1024 elements) | `lochan` | `local-sync` | `local-channel` |
 | --- | --- | --- | --- |
-| `mpsc` unbounded — buffer + drain | 10.3 µs · 99 Melem/s | 6.0 µs · 171 Melem/s | 8.0 µs · 127 Melem/s |
-| `mpsc` bounded — buffer + drain | 13.1 µs · 78 Melem/s | 16.4 µs · 63 Melem/s | — |
-| `oneshot` — create + send + recv | 20.9 ns | 19.7 ns | — |
+| `mpsc` unbounded — buffer + drain | 6.7 µs · 154 Melem/s | 6.1 µs · 168 Melem/s | 6.0 µs · 170 Melem/s |
+| `mpsc` bounded — buffer + drain | 6.3 µs · 164 Melem/s | 12.4 µs · 83 Melem/s | — |
+| `oneshot` — create + send + recv | 18.2 ns | 19.5 ns | — |
 
 Indicative numbers from one machine in release mode — reproduce with
-`cargo bench`. `lochan`'s fixed-ring `bounded` channel is the fastest of the
-three here and its `oneshot` is on par with `local-sync`; its
-segmented-block-list `unbounded` channel currently trails `local-sync`'s.
+`cargo bench`. `lochan`'s fixed-ring `bounded` channel is roughly 2× faster than
+`local-sync`'s here and its `oneshot` is on par; the segmented-block-list
+`unbounded` channel lands within ~10% — the remaining gap is `lochan`'s unified
+`Chan` (one type serves both flavors) where `local-sync` monomorphizes separate
+bounded and unbounded types.
 
 #### License
 
