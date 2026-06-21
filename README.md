@@ -6,8 +6,8 @@
 Single-threaded (`!Send`), `no_std`, **no-atomics** async channels for thread-per-core runtimes.
 
 [<img alt="github" src="https://img.shields.io/badge/github-al8n/lochan-8da0cb?style=for-the-badge&logo=Github" height="22">][Github-url]
-<img alt="LoC" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fal8n%2Fd29ceff54c025fe4e8b144a51efb9324%2Fraw%2Flochan" height="22">
-[<img alt="Build" src="https://img.shields.io/github/actions/workflow/status/al8n/lochan/coverage.yml?logo=Github-Actions&style=for-the-badge" height="22">][CI-url]
+<img alt="LoC" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fal8n%2F327b2a8aef9003246e45c6e47fe63937%2Fraw%2Flochan" height="22">
+[<img alt="Build" src="https://img.shields.io/github/actions/workflow/status/al8n/lochan/ci.yml?logo=Github-Actions&style=for-the-badge" height="22">][CI-url]
 [<img alt="codecov" src="https://img.shields.io/codecov/c/gh/al8n/lochan?style=for-the-badge&token=6R3QFWRWHL&logo=codecov" height="22">][codecov-url]
 
 
