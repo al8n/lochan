@@ -1,6 +1,12 @@
 //! The `mpsc` channel handles, [`Sender`] and [`Receiver`], shared by both flavors.
 
+use core::{
+  pin::Pin,
+  task::{Context, Poll},
+};
 use std::rc::Rc;
+
+use futures_core::stream::{FusedStream, Stream};
 
 use super::{
   chan::Chan,
@@ -125,6 +131,45 @@ impl<T> Receiver<T> {
     Recv::new(self)
   }
 
+  /// Returns an iterator over the items currently queued, without waiting: it yields
+  /// each ready item and stops at the first empty-or-disconnected poll.
+  #[inline]
+  pub fn try_iter(&mut self) -> TryIter<'_, T> {
+    TryIter(self)
+  }
+
+  /// The shared recv state machine, used by the [`Recv`] future and the [`Stream`]
+  /// impl. Pops an item (waking parked senders), reports `None` once disconnected, or
+  /// registers `cx`'s waker and rechecks — `Recv`'s golden panic-safe path.
+  #[inline]
+  pub(super) fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
+    let chan = &self.chan;
+    if let Some(item) = chan.pop() {
+      // A slot freed — wake parked senders (bounded backpressure).
+      chan.wake_senders();
+      return Poll::Ready(Some(item));
+    }
+    if chan.senders() == 0 {
+      // Empty and every sender is gone — the channel is disconnected.
+      return Poll::Ready(None);
+    }
+    chan.register_recv_waker(cx.waker());
+    // RECHECK: register_recv_waker's clone/drop callbacks may have pushed an item or
+    // dropped the last sender; re-check so a wake delivered during registration is not
+    // lost. We do NOT clear the just-registered waker on the Ready branches — dropping
+    // it could panic and lose the popped item. It is stale only on this rare re-entrant
+    // path, and is dropped at a safe point (the next registration, wake, or receiver
+    // drop) where no popped item is in flight.
+    if let Some(item) = chan.pop() {
+      chan.wake_senders();
+      return Poll::Ready(Some(item));
+    }
+    if chan.senders() == 0 {
+      return Poll::Ready(None);
+    }
+    Poll::Pending
+  }
+
   pub(super) fn chan(&self) -> &Chan<T> {
     &self.chan
   }
@@ -160,5 +205,39 @@ impl<T> Drop for Receiver<T> {
     // (waker drop) panics.
     self.chan.clear_recv_waker();
     drop(drain);
+  }
+}
+
+impl<T> Stream for Receiver<T> {
+  type Item = T;
+
+  /// Polls for the next item — equivalent to polling [`Receiver::recv`]; yields `None`
+  /// once the channel is empty and every sender has dropped.
+  #[inline]
+  fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<T>> {
+    self.get_mut().poll_recv(cx)
+  }
+}
+
+impl<T> FusedStream for Receiver<T> {
+  /// Terminated once the channel is drained and every sender has dropped — past that,
+  /// `poll_next` only returns `None`.
+  #[inline]
+  fn is_terminated(&self) -> bool {
+    self.chan.senders() == 0 && self.chan.is_empty()
+  }
+}
+
+/// A non-blocking iterator over the currently-available items of a [`Receiver`],
+/// returned by [`Receiver::try_iter`]. `next` yields each queued item and stops at the
+/// first empty-or-disconnected poll.
+pub struct TryIter<'a, T>(&'a mut Receiver<T>);
+
+impl<T> Iterator for TryIter<'_, T> {
+  type Item = T;
+
+  #[inline]
+  fn next(&mut self) -> Option<T> {
+    self.0.try_recv().ok()
   }
 }

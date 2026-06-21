@@ -239,3 +239,23 @@ fn poll_after_ready_is_pending() {
   // A spurious re-poll after completion stays Pending (`done`).
   assert_eq!(poll_once(&mut rx, &w), Poll::Pending);
 }
+
+#[test]
+fn try_iter_yields_sent_value_then_nothing() {
+  let (tx, mut rx) = channel::<u32>();
+  tx.send(7).unwrap();
+  assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![7]);
+  // The value was consumed; a second drain yields nothing.
+  assert_eq!(rx.try_iter().count(), 0);
+}
+
+#[test]
+fn try_iter_preserves_cancellation_for_a_later_poll() {
+  let (tx, mut rx) = channel::<u32>();
+  drop(tx); // the sender cancels without sending
+            // try_iter drains delivered values only; it must NOT swallow the cancellation, so a
+            // later poll still observes `Canceled` instead of hanging on `Pending`.
+  assert_eq!(rx.try_iter().next(), None);
+  let (w, _cw) = counting_waker();
+  assert_eq!(poll_once(&mut rx, &w), Poll::Ready(Err(Canceled)));
+}

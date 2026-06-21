@@ -13,7 +13,7 @@ mod recv;
 mod ring;
 mod send;
 
-pub use channel::{Receiver, Sender};
+pub use channel::{Receiver, Sender, TryIter};
 pub use error::{SendError, TryRecvError, TrySendError};
 pub use recv::Recv;
 pub use send::Send;
