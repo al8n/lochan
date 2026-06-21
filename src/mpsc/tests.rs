@@ -36,7 +36,7 @@ fn try_recv_drains_queue_before_reporting_disconnected() {
 #[test]
 fn bounded_reports_len_capacity_and_fullness() {
   let (tx, mut rx) = bounded::<u32>(2);
-  assert_eq!(tx.capacity(), 2);
+  assert_eq!(tx.capacity(), Some(2));
   assert!(tx.is_empty());
   assert!(!tx.is_closed());
   tx.try_send(1).unwrap();
@@ -65,4 +65,39 @@ fn is_closed_after_receiver_drop() {
   assert!(!tx.is_closed());
   drop(rx);
   assert!(tx.is_closed());
+}
+
+#[test]
+fn unbounded_try_send_recv_is_fifo_across_blocks() {
+  let (tx, mut rx) = unbounded::<u32>();
+  for i in 0..100 {
+    tx.try_send(i).unwrap(); // never full
+  }
+  for i in 0..100 {
+    assert_eq!(rx.try_recv(), Ok(i));
+  }
+  assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+}
+
+#[test]
+fn unbounded_has_no_capacity_and_is_never_full() {
+  let (tx, _rx) = unbounded::<u32>();
+  assert_eq!(tx.capacity(), None);
+  assert!(!tx.is_full());
+}
+
+#[test]
+fn unbounded_try_send_after_receiver_drop_is_closed() {
+  let (tx, rx) = unbounded::<u32>();
+  drop(rx);
+  assert!(matches!(tx.try_send(1), Err(TrySendError::Closed(1))));
+}
+
+#[test]
+fn unbounded_drains_queue_before_reporting_disconnected() {
+  let (tx, mut rx) = unbounded::<u32>();
+  tx.try_send(1).unwrap();
+  drop(tx);
+  assert_eq!(rx.try_recv(), Ok(1));
+  assert_eq!(rx.try_recv(), Err(TryRecvError::Disconnected));
 }

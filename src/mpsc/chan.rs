@@ -6,13 +6,77 @@ use core::{
   task::Waker,
 };
 
-use super::ring::Ring;
+use super::{list::BlockList, ring::Ring};
+
+/// The storage backing a channel: a fixed ring (bounded) or a segmented block-list
+/// (unbounded). Dispatch is a single match per operation.
+enum Flavor<T> {
+  Bounded(Ring<T>),
+  Unbounded(BlockList<T>),
+}
+
+impl<T> Flavor<T> {
+  fn len(&self) -> usize {
+    match self {
+      Self::Bounded(r) => r.len(),
+      Self::Unbounded(l) => l.len(),
+    }
+  }
+
+  fn is_empty(&self) -> bool {
+    match self {
+      Self::Bounded(r) => r.is_empty(),
+      Self::Unbounded(l) => l.is_empty(),
+    }
+  }
+
+  /// The capacity, or `None` when unbounded.
+  fn cap(&self) -> Option<usize> {
+    match self {
+      Self::Bounded(r) => Some(r.cap()),
+      Self::Unbounded(_) => None,
+    }
+  }
+
+  fn is_full(&self) -> bool {
+    match self {
+      Self::Bounded(r) => r.is_full(),
+      Self::Unbounded(_) => false,
+    }
+  }
+
+  /// Pushes, or hands the item back via `Err` when a bounded channel is full.
+  /// Unbounded never fails.
+  fn try_push(&mut self, item: T) -> Result<(), T> {
+    match self {
+      Self::Bounded(r) => r.push(item),
+      Self::Unbounded(l) => {
+        l.push(item);
+        Ok(())
+      }
+    }
+  }
+
+  fn pop(&mut self) -> Option<T> {
+    match self {
+      Self::Bounded(r) => r.pop(),
+      Self::Unbounded(l) => l.pop(),
+    }
+  }
+
+  fn clear(&mut self) {
+    match self {
+      Self::Bounded(r) => r.clear(),
+      Self::Unbounded(l) => l.clear(),
+    }
+  }
+}
 
 /// Shared state behind every `mpsc` handle. Holds `Rc`/`Cell`/`RefCell` — never
 /// atomics — so it is `!Send`: a single thread owns both ends and cannot race
 /// itself, which is what lets `poll` register-then-return without a recheck.
 pub(super) struct Chan<T> {
-  ring: RefCell<Ring<T>>,
+  flavor: RefCell<Flavor<T>>,
   /// Live sender count. Once it hits zero the receiver drains what is queued and
   /// then reports disconnect.
   senders: Cell<usize>,
@@ -27,8 +91,16 @@ pub(super) struct Chan<T> {
 
 impl<T> Chan<T> {
   pub(super) fn bounded(cap: usize) -> Rc<Self> {
+    Self::new(Flavor::Bounded(Ring::with_capacity(cap)))
+  }
+
+  pub(super) fn unbounded() -> Rc<Self> {
+    Self::new(Flavor::Unbounded(BlockList::new()))
+  }
+
+  fn new(flavor: Flavor<T>) -> Rc<Self> {
     Rc::new(Self {
-      ring: RefCell::new(Ring::with_capacity(cap)),
+      flavor: RefCell::new(flavor),
       senders: Cell::new(1),
       receiver_alive: Cell::new(true),
       recv_waker: RefCell::new(None),
@@ -36,20 +108,20 @@ impl<T> Chan<T> {
     })
   }
 
-  pub(super) fn cap(&self) -> usize {
-    self.ring.borrow().cap()
+  pub(super) fn cap(&self) -> Option<usize> {
+    self.flavor.borrow().cap()
   }
 
   pub(super) fn len(&self) -> usize {
-    self.ring.borrow().len()
+    self.flavor.borrow().len()
   }
 
   pub(super) fn is_empty(&self) -> bool {
-    self.ring.borrow().is_empty()
+    self.flavor.borrow().is_empty()
   }
 
   pub(super) fn is_full(&self) -> bool {
-    self.ring.borrow().is_full()
+    self.flavor.borrow().is_full()
   }
 
   pub(super) fn receiver_alive(&self) -> bool {
@@ -89,18 +161,18 @@ impl<T> Chan<T> {
     }
   }
 
-  /// Pushes if there is room; returns `Err(item)` when the channel is full.
+  /// Pushes if there is room; returns `Err(item)` when a bounded channel is full.
   pub(super) fn try_push(&self, item: T) -> Result<(), T> {
-    self.ring.borrow_mut().push(item)
+    self.flavor.borrow_mut().try_push(item)
   }
 
   pub(super) fn pop(&self) -> Option<T> {
-    self.ring.borrow_mut().pop()
+    self.flavor.borrow_mut().pop()
   }
 
   /// Drops every queued item, releasing their memory at once. Used on receiver drop:
   /// the items are unreachable, but a live sender keeps `Chan` alive.
   pub(super) fn drain(&self) {
-    self.ring.borrow_mut().clear();
+    self.flavor.borrow_mut().clear();
   }
 }

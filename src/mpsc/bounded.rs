@@ -34,8 +34,8 @@ impl<T> Sender<T> {
     }
   }
 
-  /// The channel's maximum number of queued items.
-  pub fn capacity(&self) -> usize {
+  /// The channel's capacity, or `None` if the channel is unbounded.
+  pub fn capacity(&self) -> Option<usize> {
     self.chan.cap()
   }
 

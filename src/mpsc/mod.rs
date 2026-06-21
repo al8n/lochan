@@ -32,5 +32,12 @@ pub fn bounded<T>(cap: usize) -> (Sender<T>, Receiver<T>) {
   (Sender::new(chan.clone()), Receiver::new(chan))
 }
 
+/// Creates an unbounded channel: [`Sender::try_send`] never reports
+/// [`TrySendError::Full`], growing the queue a block at a time as needed.
+pub fn unbounded<T>() -> (Sender<T>, Receiver<T>) {
+  let chan = Chan::unbounded();
+  (Sender::new(chan.clone()), Receiver::new(chan))
+}
+
 #[cfg(test)]
 mod tests;

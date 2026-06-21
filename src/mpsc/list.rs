@@ -123,6 +123,11 @@ impl<T, const N: usize> BlockList<T, N> {
       unsafe { drop(Box::from_raw(old.as_ptr())) };
     }
   }
+
+  /// Drops every queued item, leaving the list empty.
+  pub(super) fn clear(&mut self) {
+    while self.pop().is_some() {}
+  }
 }
 
 impl<T, const N: usize> Drop for BlockList<T, N> {
