@@ -8,7 +8,7 @@ use core::{
 
 use futures_core::future::FusedFuture;
 
-use super::bounded::Receiver;
+use super::channel::Receiver;
 
 /// The future returned by [`Receiver::recv`](super::Receiver::recv). It holds no
 /// `T`, so it is `Unpin` regardless of `T`, and implements [`FusedFuture`] so it can

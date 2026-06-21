@@ -5,15 +5,15 @@
 //! non-blocking `try_*` surface and an awaitable `recv` (and, when bounded, `send`)
 //! whose futures are `Unpin` + [`FusedFuture`](futures_core::future::FusedFuture).
 
-mod bounded;
 mod chan;
+mod channel;
 mod error;
 mod list;
 mod recv;
 mod ring;
 mod send;
 
-pub use bounded::{Receiver, Sender};
+pub use channel::{Receiver, Sender};
 pub use error::{SendError, TryRecvError, TrySendError};
 pub use recv::Recv;
 pub use send::Send;

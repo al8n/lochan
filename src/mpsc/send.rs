@@ -8,7 +8,7 @@ use core::{
 
 use futures_core::future::FusedFuture;
 
-use super::{bounded::Sender, error::SendError};
+use super::{channel::Sender, error::SendError};
 
 /// The future returned by [`Sender::send`](super::Sender::send). It holds the pending
 /// item, so it is `Unpin` when `T: Unpin`, and implements [`FusedFuture`] so it can

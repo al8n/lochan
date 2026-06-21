@@ -1,4 +1,4 @@
-//! Bounded `mpsc`: [`Sender`] and [`Receiver`].
+//! The `mpsc` channel handles, [`Sender`] and [`Receiver`], shared by both flavors.
 
 use alloc::rc::Rc;
 
@@ -9,7 +9,7 @@ use super::{
   send::Send,
 };
 
-/// The sending half of a bounded channel. Cloneable — every clone is another
+/// The sending half of an `mpsc` channel. Cloneable — every clone is another
 /// producer.
 pub struct Sender<T> {
   chan: Rc<Chan<T>>,
@@ -91,7 +91,7 @@ impl<T> Drop for Sender<T> {
   }
 }
 
-/// The receiving half of a bounded channel. Single-consumer — not `Clone`.
+/// The receiving half of an `mpsc` channel. Single-consumer — not `Clone`.
 pub struct Receiver<T> {
   chan: Rc<Chan<T>>,
 }
