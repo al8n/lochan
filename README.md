@@ -40,7 +40,7 @@ driver state machine.
 
 ## Usage
 
-```rust
+```rust,ignore
 // mpsc — sync surface
 let (tx, mut rx) = lochan::mpsc::bounded::<u32>(16);
 tx.try_send(1).unwrap();
