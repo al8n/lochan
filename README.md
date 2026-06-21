@@ -10,6 +10,7 @@ Single-threaded (`!Send`), `no_std`, **no-atomics** async channels for thread-pe
 [<img alt="Build" src="https://img.shields.io/github/actions/workflow/status/al8n/lochan/coverage.yml?logo=Github-Actions&style=for-the-badge" height="22">][CI-url]
 [<img alt="codecov" src="https://img.shields.io/codecov/c/gh/al8n/lochan?style=for-the-badge&token=6R3QFWRWHL&logo=codecov" height="22">][codecov-url]
 
+
 [<img alt="docs.rs" src="https://img.shields.io/badge/docs.rs-lochan-66c2a5?style=for-the-badge&labelColor=555555&logo=docs.rs" height="20">][doc-url]
 [<img alt="crates.io" src="https://img.shields.io/crates/v/lochan?style=for-the-badge&logo=rust" height="22">][crates-url]
 [<img alt="crates.io" src="https://img.shields.io/crates/d/lochan?color=critical&logo=rust&style=for-the-badge" height="22">][crates-url]
@@ -65,6 +66,25 @@ lochan = "0.1"
 
 For `no_std`, disable default features: `lochan = { version = "0.1", default-features = false }`.
 
+## Benchmarks
+
+A throughput comparison against the other single-threaded (`!Send`) channel
+crates, [`local-sync`] and [`local-channel`], measured with `cargo bench`
+(criterion). Each `mpsc` row buffers 1024 `u32` values then drains them on a
+single task; `oneshot` times one create + send + receive. `local-channel`
+provides only an unbounded `mpsc`.
+
+| benchmark (1024 elements) | `lochan` | `local-sync` | `local-channel` |
+| --- | --- | --- | --- |
+| `mpsc` unbounded — buffer + drain | 10.3 µs · 99 Melem/s | 6.0 µs · 171 Melem/s | 8.0 µs · 127 Melem/s |
+| `mpsc` bounded — buffer + drain | 13.1 µs · 78 Melem/s | 16.4 µs · 63 Melem/s | — |
+| `oneshot` — create + send + recv | 20.9 ns | 19.7 ns | — |
+
+Indicative numbers from one machine in release mode — reproduce with
+`cargo bench`. `lochan`'s fixed-ring `bounded` channel is the fastest of the
+three here and its `oneshot` is on par with `local-sync`; its
+segmented-block-list `unbounded` channel currently trails `local-sync`'s.
+
 #### License
 
 `lochan` is under the terms of both the MIT license and the Apache License
@@ -83,3 +103,5 @@ Copyright (c) 2026 Al Liu.
 [codecov-url]: https://app.codecov.io/gh/al8n/lochan/
 [doc-url]: https://docs.rs/lochan
 [crates-url]: https://crates.io/crates/lochan
+[`local-sync`]: https://crates.io/crates/local-sync
+[`local-channel`]: https://crates.io/crates/local-channel
