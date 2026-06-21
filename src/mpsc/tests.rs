@@ -172,3 +172,58 @@ fn recv_future_reports_terminated_after_ready() {
   let _ = poll_once(&mut fut, &w);
   assert!(fut.is_terminated());
 }
+
+#[test]
+fn send_ready_when_room() {
+  let (tx, mut rx) = bounded::<u32>(2);
+  let (w, _cw) = counting_waker();
+  let mut fut = tx.send(7);
+  assert!(matches!(poll_once(&mut fut, &w), Poll::Ready(Ok(()))));
+  assert_eq!(rx.try_recv(), Ok(7));
+}
+
+#[test]
+fn send_parks_when_full_then_wakes_on_recv() {
+  let (tx, mut rx) = bounded::<u32>(1);
+  tx.try_send(1).unwrap(); // fill
+  let (w, cw) = counting_waker();
+  let mut fut = tx.send(2);
+  assert!(poll_once(&mut fut, &w).is_pending()); // full → parks
+  assert_eq!(cw.0.load(Ordering::SeqCst), 0);
+  assert_eq!(rx.try_recv(), Ok(1)); // frees a slot → wakes the parked send
+  assert_eq!(cw.0.load(Ordering::SeqCst), 1);
+  assert!(matches!(poll_once(&mut fut, &w), Poll::Ready(Ok(()))));
+  assert_eq!(rx.try_recv(), Ok(2));
+}
+
+#[test]
+fn send_returns_err_when_receiver_gone() {
+  let (tx, rx) = bounded::<u32>(1);
+  drop(rx);
+  let (w, _cw) = counting_waker();
+  let mut fut = tx.send(3);
+  match poll_once(&mut fut, &w) {
+    Poll::Ready(Err(e)) => assert_eq!(e.into_inner(), 3),
+    _ => panic!("expected a SendError"),
+  }
+}
+
+#[test]
+fn unbounded_send_is_immediate() {
+  let (tx, mut rx) = unbounded::<u32>();
+  let (w, _cw) = counting_waker();
+  let mut fut = tx.send(8);
+  assert!(matches!(poll_once(&mut fut, &w), Poll::Ready(Ok(()))));
+  assert_eq!(rx.try_recv(), Ok(8));
+}
+
+#[test]
+fn send_future_reports_terminated_after_ready() {
+  let (tx, mut rx) = bounded::<u32>(2);
+  let (w, _cw) = counting_waker();
+  let mut fut = tx.send(1);
+  assert!(!fut.is_terminated());
+  let _ = poll_once(&mut fut, &w);
+  assert!(fut.is_terminated());
+  let _ = rx.try_recv();
+}

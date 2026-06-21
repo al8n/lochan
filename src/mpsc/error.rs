@@ -89,3 +89,33 @@ impl fmt::Display for TryRecvError {
 }
 
 impl core::error::Error for TryRecvError {}
+
+/// Error returned by [`Sender::send`](super::Sender::send) when the receiver is gone.
+/// Carries the unsent item back.
+pub struct SendError<T>(T);
+
+impl<T> SendError<T> {
+  pub(super) fn new(item: T) -> Self {
+    Self(item)
+  }
+
+  /// Consumes the error, returning the item that could not be sent.
+  pub fn into_inner(self) -> T {
+    self.0
+  }
+}
+
+// Hand-written so the payload `T` is never required to be `Debug`, and is never shown.
+impl<T> fmt::Debug for SendError<T> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str("SendError(..)")
+  }
+}
+
+impl<T> fmt::Display for SendError<T> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str("sending on a closed channel")
+  }
+}
+
+impl<T> core::error::Error for SendError<T> {}

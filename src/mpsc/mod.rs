@@ -11,10 +11,12 @@ mod error;
 mod list;
 mod recv;
 mod ring;
+mod send;
 
 pub use bounded::{Receiver, Sender};
-pub use error::{TryRecvError, TrySendError};
+pub use error::{SendError, TryRecvError, TrySendError};
 pub use recv::Recv;
+pub use send::Send;
 
 use chan::Chan;
 

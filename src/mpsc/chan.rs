@@ -164,6 +164,13 @@ impl<T> Chan<T> {
     *self.recv_waker.borrow_mut() = Some(waker.clone());
   }
 
+  pub(super) fn register_send_waker(&self, waker: &Waker) {
+    let mut wakers = self.send_wakers.borrow_mut();
+    if !wakers.iter().any(|w| w.will_wake(waker)) {
+      wakers.push(waker.clone());
+    }
+  }
+
   /// Pushes if there is room; returns `Err(item)` when a bounded channel is full.
   pub(super) fn try_push(&self, item: T) -> Result<(), T> {
     self.flavor.borrow_mut().try_push(item)

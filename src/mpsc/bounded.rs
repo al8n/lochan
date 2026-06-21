@@ -6,6 +6,7 @@ use super::{
   chan::Chan,
   error::{TryRecvError, TrySendError},
   recv::Recv,
+  send::Send,
 };
 
 /// The sending half of a bounded channel. Cloneable — every clone is another
@@ -58,6 +59,17 @@ impl<T> Sender<T> {
   /// Returns `true` once the receiver has been dropped.
   pub fn is_closed(&self) -> bool {
     !self.chan.receiver_alive()
+  }
+
+  /// Returns a future that sends `item`, awaiting capacity when a bounded channel is
+  /// full. Resolves to [`SendError`](super::SendError) (carrying the item) if the
+  /// receiver is gone. The future is `FusedFuture` (and `Unpin` when `T: Unpin`).
+  pub fn send(&self, item: T) -> Send<'_, T> {
+    Send::new(self, item)
+  }
+
+  pub(super) fn chan(&self) -> &Chan<T> {
+    &self.chan
   }
 }
 
