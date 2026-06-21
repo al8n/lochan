@@ -82,5 +82,5 @@ impl<T> Drop for Ring<T> {
   }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;

@@ -232,5 +232,5 @@ impl fmt::Display for Canceled {
 
 impl core::error::Error for Canceled {}
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;

@@ -148,5 +148,5 @@ impl<T, const N: usize> Drop for BlockList<T, N> {
   }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;

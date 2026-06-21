@@ -46,5 +46,5 @@ pub fn unbounded<T>() -> (Sender<T>, Receiver<T>) {
   (Sender::new(chan.clone()), Receiver::new(chan))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;
