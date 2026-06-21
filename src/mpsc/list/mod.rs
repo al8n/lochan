@@ -12,7 +12,7 @@ use core::{
   cell::{Cell, UnsafeCell},
   marker::PhantomData,
   mem::MaybeUninit,
-  ptr::{NonNull, addr_of_mut},
+  ptr::{addr_of_mut, NonNull},
 };
 
 /// One block: a fixed array of `N` slots plus the link to the next block. Slots

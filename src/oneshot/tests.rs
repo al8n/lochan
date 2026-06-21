@@ -11,7 +11,7 @@ use core::{
 
 use futures::{
   future::FusedFuture,
-  task::{ArcWake, waker},
+  task::{waker, ArcWake},
 };
 
 struct CountingWaker(AtomicUsize);

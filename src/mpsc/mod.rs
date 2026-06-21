@@ -31,7 +31,10 @@ use chan::Chan;
 ///
 /// Panics if `cap == 0`.
 pub fn bounded<T>(cap: usize) -> (Sender<T>, Receiver<T>) {
-  assert!(cap > 0, "lochan::mpsc::bounded requires a non-zero capacity");
+  assert!(
+    cap > 0,
+    "lochan::mpsc::bounded requires a non-zero capacity"
+  );
   let chan = Chan::bounded(cap);
   (Sender::new(chan.clone()), Receiver::new(chan))
 }

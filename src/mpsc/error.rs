@@ -2,9 +2,8 @@
 
 use core::fmt;
 
-/// Error returned by [`Sender::try_send`](super::Sender::try_send) (and
-/// [`UnboundedSender::send`](super::UnboundedSender::send)) when an item cannot be
-/// delivered. The unsent item is carried back.
+/// Error returned by [`Sender::try_send`](super::Sender::try_send) when an item
+/// cannot be delivered. The unsent item is carried back.
 pub enum TrySendError<T> {
   /// The bounded channel is at capacity.
   Full(T),
