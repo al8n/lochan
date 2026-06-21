@@ -722,3 +722,135 @@ fn receiver_drop_clears_a_stale_recheck_recv_waker() {
   drop(tx);
   waker.wake(); // consume our handle without a (counted) drop
 }
+
+#[test]
+fn try_send_error_methods() {
+  let full = TrySendError::Full(7u32);
+  assert!(full.is_full());
+  assert!(!full.is_closed());
+  assert_eq!(format!("{full}"), "sending on a full channel");
+  assert_eq!(format!("{full:?}"), "Full(..)");
+  assert_eq!(full.into_inner(), 7);
+
+  let closed = TrySendError::Closed(9u32);
+  assert!(closed.is_closed());
+  assert!(!closed.is_full());
+  assert_eq!(format!("{closed}"), "sending on a closed channel");
+  assert_eq!(format!("{closed:?}"), "Closed(..)");
+  assert_eq!(closed.into_inner(), 9);
+}
+
+#[test]
+fn try_recv_error_methods() {
+  let empty = TryRecvError::Empty;
+  assert!(empty.is_empty());
+  assert!(!empty.is_disconnected());
+  assert_eq!(empty.as_str(), "receiving on an empty channel");
+  assert_eq!(format!("{empty}"), empty.as_str());
+
+  let disconnected = TryRecvError::Disconnected;
+  assert!(disconnected.is_disconnected());
+  assert!(!disconnected.is_empty());
+  assert_eq!(
+    disconnected.as_str(),
+    "receiving on an empty and disconnected channel"
+  );
+  assert_eq!(format!("{disconnected}"), disconnected.as_str());
+}
+
+#[test]
+fn send_error_methods() {
+  let (tx, rx) = bounded::<u32>(1);
+  drop(rx);
+  let (w, _cw) = counting_waker();
+  let mut fut = tx.send(5);
+  match poll_once(&mut fut, &w) {
+    Poll::Ready(Err(e)) => {
+      assert_eq!(format!("{e}"), "sending on a closed channel");
+      assert_eq!(format!("{e:?}"), "SendError(..)");
+      assert_eq!(e.into_inner(), 5);
+    }
+    other => panic!("expected a SendError, got {other:?}"),
+  }
+}
+
+#[test]
+fn accessors_cover_both_flavors() {
+  // Unbounded: Sender + Receiver len / is_empty (the unbounded `Flavor` arms).
+  let (tx, mut rx) = unbounded::<u32>();
+  assert!(tx.is_empty() && rx.is_empty());
+  assert_eq!(tx.len(), 0);
+  assert_eq!(rx.len(), 0);
+  tx.try_send(1).unwrap();
+  assert_eq!(tx.len(), 1);
+  assert_eq!(rx.len(), 1);
+  assert!(!tx.is_empty() && !rx.is_empty());
+  assert_eq!(rx.try_recv(), Ok(1));
+
+  // Bounded: the Receiver's len / is_empty.
+  let (tx, mut rx) = bounded::<u32>(2);
+  assert!(rx.is_empty());
+  assert_eq!(rx.len(), 0);
+  tx.try_send(1).unwrap();
+  assert_eq!(rx.len(), 1);
+  assert!(!rx.is_empty());
+  assert_eq!(rx.try_recv(), Ok(1));
+}
+
+#[test]
+fn receiver_drop_drains_queued_items() {
+  let drops = Rc::new(Cell::new(0));
+  #[derive(Debug)]
+  struct D(Rc<Cell<usize>>);
+  impl Drop for D {
+    fn drop(&mut self) {
+      self.0.set(self.0.get() + 1);
+    }
+  }
+  let (tx, rx) = unbounded::<D>();
+  for _ in 0..3 {
+    tx.try_send(D(drops.clone())).unwrap();
+  }
+  assert_eq!(drops.get(), 0);
+  drop(rx); // Receiver::drop drains the queued items
+  assert_eq!(drops.get(), 3);
+}
+
+#[test]
+#[should_panic(expected = "non-zero capacity")]
+fn bounded_zero_capacity_panics() {
+  let _ = bounded::<u32>(0);
+}
+
+#[test]
+fn recv_recheck_observes_disconnect_during_registration() {
+  use core::{
+    ptr,
+    task::{Context, RawWaker, RawWakerVTable, Waker},
+  };
+
+  std::thread_local! {
+    static LAST_TX: core::cell::RefCell<Option<Sender<u32>>> =
+      const { core::cell::RefCell::new(None) };
+  }
+  // A waker whose CLONE drops the last sender, so registration leaves the channel
+  // disconnected and the recv's recheck takes the `senders() == 0` branch.
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    LAST_TX.with(|t| drop(t.borrow_mut().take()));
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_noop, vt_noop, vt_noop);
+
+  let (tx, mut rx) = unbounded::<u32>();
+  LAST_TX.with(|t| *t.borrow_mut() = Some(tx));
+  let waker = unsafe { Waker::from_raw(RawWaker::new(ptr::null(), &VT)) };
+
+  // First check: empty, sender alive → register → the clone drops the sender → recheck
+  // sees `senders() == 0` → disconnected.
+  let mut fut = rx.recv();
+  assert_eq!(
+    Pin::new(&mut fut).poll(&mut Context::from_waker(&waker)),
+    Poll::Ready(None)
+  );
+}

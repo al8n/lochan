@@ -211,3 +211,31 @@ fn receiver_delivers_rechecked_value_despite_a_panicking_recv_waker_drop() {
   rx.inner.wake_receiver();
   waker.wake();
 }
+
+#[test]
+fn canceled_display_and_debug() {
+  assert_eq!(
+    format!("{Canceled}"),
+    "oneshot sender dropped without sending a value"
+  );
+  assert_eq!(format!("{Canceled:?}"), "Canceled");
+}
+
+#[test]
+fn try_recv_after_completion_is_none() {
+  let (tx, mut rx) = channel::<u32>();
+  tx.send(5).unwrap();
+  assert_eq!(rx.try_recv(), Ok(Some(5)));
+  // `done` is set after the value is taken — a further try_recv yields Ok(None).
+  assert_eq!(rx.try_recv(), Ok(None));
+}
+
+#[test]
+fn poll_after_ready_is_pending() {
+  let (tx, mut rx) = channel::<u32>();
+  tx.send(5).unwrap();
+  let (w, _cw) = counting_waker();
+  assert_eq!(poll_once(&mut rx, &w), Poll::Ready(Ok(5)));
+  // A spurious re-poll after completion stays Pending (`done`).
+  assert_eq!(poll_once(&mut rx, &w), Poll::Pending);
+}
