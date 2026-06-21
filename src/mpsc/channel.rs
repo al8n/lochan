@@ -99,7 +99,11 @@ impl<T> Drop for Sender<T> {
   }
 }
 
-/// The receiving half of an `mpsc` channel. Single-consumer — not `Clone`.
+/// The receiving half of an `mpsc` channel. Single-consumer — not `Clone`, so there is
+/// exactly one receiver by construction. Its methods take `&self` (the queue lives
+/// behind an `Rc`), so a held [`recv`](Self::recv) future and a synchronous
+/// [`try_recv`](Self::try_recv) drain can run against the same receiver. As the sole
+/// consumer, do not hold two `recv` futures at once — that would race their wakers.
 pub struct Receiver<T> {
   chan: Rc<Chan<T>>,
 }
@@ -113,7 +117,7 @@ impl<T> Receiver<T> {
   /// queued, or [`TryRecvError::Disconnected`] when the queue is empty and every
   /// sender has dropped.
   #[inline(always)]
-  pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+  pub fn try_recv(&self) -> Result<T, TryRecvError> {
     match self.chan.pop() {
       Some(item) => {
         self.chan.wake_senders();
@@ -127,14 +131,14 @@ impl<T> Receiver<T> {
   /// Returns a future that resolves to the next item, or `None` once the channel is
   /// empty and every sender has dropped. The future is `Unpin` + `FusedFuture`.
   #[inline(always)]
-  pub fn recv(&mut self) -> Recv<'_, T> {
+  pub fn recv(&self) -> Recv<'_, T> {
     Recv::new(self)
   }
 
   /// Returns an iterator over the items currently queued, without waiting: it yields
   /// each ready item and stops at the first empty-or-disconnected poll.
   #[inline]
-  pub fn try_iter(&mut self) -> TryIter<'_, T> {
+  pub fn try_iter(&self) -> TryIter<'_, T> {
     TryIter(self)
   }
 
@@ -142,7 +146,7 @@ impl<T> Receiver<T> {
   /// impl. Pops an item (waking parked senders), reports `None` once disconnected, or
   /// registers `cx`'s waker and rechecks — `Recv`'s golden panic-safe path.
   #[inline]
-  pub(super) fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
+  pub(super) fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Option<T>> {
     let chan = &self.chan;
     if let Some(item) = chan.pop() {
       // A slot freed — wake parked senders (bounded backpressure).
@@ -231,7 +235,7 @@ impl<T> FusedStream for Receiver<T> {
 /// A non-blocking iterator over the currently-available items of a [`Receiver`],
 /// returned by [`Receiver::try_iter`]. `next` yields each queued item and stops at the
 /// first empty-or-disconnected poll.
-pub struct TryIter<'a, T>(&'a mut Receiver<T>);
+pub struct TryIter<'a, T>(&'a Receiver<T>);
 
 impl<T> Iterator for TryIter<'_, T> {
   type Item = T;

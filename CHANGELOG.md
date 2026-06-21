@@ -1,5 +1,16 @@
 # UNRELEASED
 
+# 0.1.2 (June 22nd, 2026)
+
+CHANGED
+
+- `mpsc::Receiver::recv`, `try_recv`, and `try_iter` now take `&self` instead of
+  `&mut self`. The queue lives behind an `Rc`, so a held `recv` future and a synchronous
+  `try_recv` drain can run against one receiver — the access pattern a single-threaded
+  driver's `select` loop needs. The `Receiver` is still single-consumer (not `Clone`);
+  holding two `recv` futures at once is a logic error. Existing `&mut`-based call sites
+  keep compiling (the `mut` simply becomes redundant).
+
 # 0.1.1 (June 21st, 2026)
 
 FEATURES

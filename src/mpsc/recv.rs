@@ -14,13 +14,13 @@ use super::channel::Receiver;
 /// `T`, so it is `Unpin` regardless of `T`, and implements [`FusedFuture`] so it can
 /// be polled in `select_biased!` without `.fuse()`.
 pub struct Recv<'a, T> {
-  receiver: &'a mut Receiver<T>,
+  receiver: &'a Receiver<T>,
   done: bool,
 }
 
 impl<'a, T> Recv<'a, T> {
   #[inline(always)]
-  pub(super) fn new(receiver: &'a mut Receiver<T>) -> Self {
+  pub(super) fn new(receiver: &'a Receiver<T>) -> Self {
     Self {
       receiver,
       done: false,

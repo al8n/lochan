@@ -16,7 +16,7 @@ use futures::{
 
 #[test]
 fn bounded_try_send_recv_is_fifo() {
-  let (tx, mut rx) = bounded::<u32>(4);
+  let (tx, rx) = bounded::<u32>(4);
   tx.try_send(1).unwrap();
   tx.try_send(2).unwrap();
   assert_eq!(rx.try_recv(), Ok(1));
@@ -40,7 +40,7 @@ fn try_send_after_receiver_drop_is_closed() {
 
 #[test]
 fn try_recv_drains_queue_before_reporting_disconnected() {
-  let (tx, mut rx) = bounded::<u32>(4);
+  let (tx, rx) = bounded::<u32>(4);
   tx.try_send(1).unwrap();
   drop(tx);
   assert_eq!(rx.try_recv(), Ok(1));
@@ -49,7 +49,7 @@ fn try_recv_drains_queue_before_reporting_disconnected() {
 
 #[test]
 fn bounded_reports_len_capacity_and_fullness() {
-  let (tx, mut rx) = bounded::<u32>(2);
+  let (tx, rx) = bounded::<u32>(2);
   assert_eq!(tx.capacity(), Some(2));
   assert!(tx.is_empty());
   assert!(!tx.is_closed());
@@ -64,7 +64,7 @@ fn bounded_reports_len_capacity_and_fullness() {
 
 #[test]
 fn cloning_a_sender_tracks_live_producers() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   let tx2 = tx.clone();
   drop(tx); // one producer remains → still open
   tx2.try_send(7).unwrap();
@@ -83,7 +83,7 @@ fn is_closed_after_receiver_drop() {
 
 #[test]
 fn unbounded_try_send_recv_is_fifo_across_blocks() {
-  let (tx, mut rx) = unbounded::<u32>();
+  let (tx, rx) = unbounded::<u32>();
   for i in 0..100 {
     tx.try_send(i).unwrap(); // never full
   }
@@ -109,7 +109,7 @@ fn unbounded_try_send_after_receiver_drop_is_closed() {
 
 #[test]
 fn unbounded_drains_queue_before_reporting_disconnected() {
-  let (tx, mut rx) = unbounded::<u32>();
+  let (tx, rx) = unbounded::<u32>();
   tx.try_send(1).unwrap();
   drop(tx);
   assert_eq!(rx.try_recv(), Ok(1));
@@ -135,7 +135,7 @@ fn poll_once<F: Future + Unpin>(fut: &mut F, w: &core::task::Waker) -> Poll<F::O
 
 #[test]
 fn recv_parks_then_wakes_on_send() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   let (w, cw) = counting_waker();
   let mut fut = rx.recv();
   assert!(poll_once(&mut fut, &w).is_pending()); // empty → parks
@@ -147,7 +147,7 @@ fn recv_parks_then_wakes_on_send() {
 
 #[test]
 fn recv_ready_when_item_available() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   tx.try_send(9).unwrap();
   let (w, _cw) = counting_waker();
   let mut fut = rx.recv();
@@ -156,7 +156,7 @@ fn recv_ready_when_item_available() {
 
 #[test]
 fn recv_returns_none_when_disconnected() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   drop(tx);
   let (w, _cw) = counting_waker();
   let mut fut = rx.recv();
@@ -165,7 +165,7 @@ fn recv_returns_none_when_disconnected() {
 
 #[test]
 fn recv_future_reports_terminated_after_ready() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   tx.try_send(1).unwrap();
   let (w, _cw) = counting_waker();
   let mut fut = rx.recv();
@@ -176,7 +176,7 @@ fn recv_future_reports_terminated_after_ready() {
 
 #[test]
 fn send_ready_when_room() {
-  let (tx, mut rx) = bounded::<u32>(2);
+  let (tx, rx) = bounded::<u32>(2);
   let (w, _cw) = counting_waker();
   let mut fut = tx.send(7);
   assert!(matches!(poll_once(&mut fut, &w), Poll::Ready(Ok(()))));
@@ -185,7 +185,7 @@ fn send_ready_when_room() {
 
 #[test]
 fn send_parks_when_full_then_wakes_on_recv() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   tx.try_send(1).unwrap(); // fill
   let (w, cw) = counting_waker();
   let mut fut = tx.send(2);
@@ -211,7 +211,7 @@ fn send_returns_err_when_receiver_gone() {
 
 #[test]
 fn unbounded_send_is_immediate() {
-  let (tx, mut rx) = unbounded::<u32>();
+  let (tx, rx) = unbounded::<u32>();
   let (w, _cw) = counting_waker();
   let mut fut = tx.send(8);
   assert!(matches!(poll_once(&mut fut, &w), Poll::Ready(Ok(()))));
@@ -220,7 +220,7 @@ fn unbounded_send_is_immediate() {
 
 #[test]
 fn send_future_reports_terminated_after_ready() {
-  let (tx, mut rx) = bounded::<u32>(2);
+  let (tx, rx) = bounded::<u32>(2);
   let (w, _cw) = counting_waker();
   let mut fut = tx.send(1);
   assert!(!fut.is_terminated());
@@ -231,7 +231,7 @@ fn send_future_reports_terminated_after_ready() {
 
 #[test]
 fn dropping_a_parked_send_unregisters_its_waker() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   tx.try_send(0).unwrap(); // fill
   let (w, cw) = counting_waker();
   {
@@ -245,7 +245,7 @@ fn dropping_a_parked_send_unregisters_its_waker() {
 
 #[test]
 fn multiple_parked_sends_all_wake_on_recv() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   tx.try_send(0).unwrap(); // fill
   let tx2 = tx.clone();
   let (w1, cw1) = counting_waker();
@@ -291,7 +291,7 @@ fn receiver_drop_wakes_sender_before_panicking_payload_drop() {
 
 #[test]
 fn completed_send_releases_its_waker() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   tx.try_send(0).unwrap(); // fill
   let cw = Arc::new(CountingWaker(AtomicUsize::new(0)));
   let w = waker(cw.clone());
@@ -381,7 +381,7 @@ fn recv_waker_registration_runs_vtable_outside_borrow() {
 
 #[test]
 fn dropping_a_pending_recv_clears_its_waker() {
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   let cw = Arc::new(CountingWaker(AtomicUsize::new(0)));
   let w = waker(cw.clone());
   {
@@ -565,7 +565,7 @@ fn send_replays_committed_ok_after_a_wake_panic() {
   unsafe fn vt_noop(_: *const ()) {}
   static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_wake, vt_wake, vt_noop);
 
-  let (tx, mut rx) = bounded::<u32>(2);
+  let (tx, rx) = bounded::<u32>(2);
   // Register a panicking recv waker directly, so the send's wake_receiver panics.
   let panicking = unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VT)) };
   tx.chan().register_recv_waker(&panicking);
@@ -592,7 +592,7 @@ fn send_keeps_message_across_a_panicking_waker_clone() {
   unsafe fn vt_noop(_: *const ()) {}
   static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_noop, vt_noop, vt_noop);
 
-  let (tx, mut rx) = bounded::<u32>(1);
+  let (tx, rx) = bounded::<u32>(1);
   tx.try_send(0).unwrap(); // fill
   let panicking = unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VT)) };
 
@@ -659,7 +659,7 @@ fn recv_delivers_rechecked_item_despite_a_panicking_recv_waker_drop() {
 
   let chan = Chan::<u32>::bounded(2);
   let _tx = Sender::new(chan.clone());
-  let mut rx = Receiver::new(chan.clone());
+  let rx = Receiver::new(chan.clone());
   let waker = unsafe { Waker::from_raw(RawWaker::new(Rc::as_ptr(&chan) as *const (), &VT)) };
 
   // pop None → register (the clone pushes 99) → recheck pop 99. The recheck no longer
@@ -708,7 +708,7 @@ fn receiver_drop_clears_a_stale_recheck_recv_waker() {
   let waker = unsafe { Waker::from_raw(RawWaker::new(addr_of!(ctx) as *const (), &VT)) };
 
   {
-    let mut rx = Receiver::new(chan.clone());
+    let rx = Receiver::new(chan.clone());
     let mut fut = rx.recv();
     // recheck-Ready: the clone pushes 99 → Ready(99), leaving its clone registered.
     assert!(matches!(
@@ -777,7 +777,7 @@ fn send_error_methods() {
 #[test]
 fn accessors_cover_both_flavors() {
   // Unbounded: Sender + Receiver len / is_empty (the unbounded `Flavor` arms).
-  let (tx, mut rx) = unbounded::<u32>();
+  let (tx, rx) = unbounded::<u32>();
   assert!(tx.is_empty() && rx.is_empty());
   assert_eq!(tx.len(), 0);
   assert_eq!(rx.len(), 0);
@@ -788,7 +788,7 @@ fn accessors_cover_both_flavors() {
   assert_eq!(rx.try_recv(), Ok(1));
 
   // Bounded: the Receiver's len / is_empty.
-  let (tx, mut rx) = bounded::<u32>(2);
+  let (tx, rx) = bounded::<u32>(2);
   assert!(rx.is_empty());
   assert_eq!(rx.len(), 0);
   tx.try_send(1).unwrap();
@@ -842,7 +842,7 @@ fn recv_recheck_observes_disconnect_during_registration() {
   unsafe fn vt_noop(_: *const ()) {}
   static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_noop, vt_noop, vt_noop);
 
-  let (tx, mut rx) = unbounded::<u32>();
+  let (tx, rx) = unbounded::<u32>();
   LAST_TX.with(|t| *t.borrow_mut() = Some(tx));
   let waker = unsafe { Waker::from_raw(RawWaker::new(ptr::null(), &VT)) };
 
@@ -886,7 +886,7 @@ fn stream_poll_next_parks_then_wakes_on_send() {
 #[test]
 fn fused_stream_terminates_once_drained_and_disconnected() {
   use futures_core::stream::FusedStream;
-  let (tx, mut rx) = unbounded::<u32>();
+  let (tx, rx) = unbounded::<u32>();
   tx.try_send(1).unwrap();
   drop(tx);
   assert!(!rx.is_terminated()); // an item is still queued
@@ -896,7 +896,7 @@ fn fused_stream_terminates_once_drained_and_disconnected() {
 
 #[test]
 fn try_iter_drains_ready_items_without_blocking() {
-  let (tx, mut rx) = unbounded::<u32>();
+  let (tx, rx) = unbounded::<u32>();
   tx.try_send(1).unwrap();
   tx.try_send(2).unwrap();
   let drained: Vec<u32> = rx.try_iter().collect();
