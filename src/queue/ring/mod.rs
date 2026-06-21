@@ -7,7 +7,7 @@ use std::{boxed::Box, vec::Vec};
 /// allocation, with `head`/`len` marking the initialized region
 /// `[head, head + len) mod cap`. Slots outside that region are uninitialized and
 /// are never read.
-pub(super) struct Ring<T> {
+pub(crate) struct Ring<T> {
   slots: Box<[MaybeUninit<T>]>,
   head: usize,
   len: usize,

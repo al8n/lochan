@@ -30,6 +30,10 @@ making them strictly lighter than their `Send` counterparts (`tokio`, `flume`,
   `MaybeUninit` ring) and `unbounded` (a segmented block-list that never
   reallocates). Non-blocking `try_send` / `try_recv`, plus awaitable
   `send` / `recv`.
+- **`mpmc`** — multi-producer, multi-consumer. The same `bounded` / `unbounded`
+  flavors, but both `Sender` and `Receiver` are `Clone`: every clone is another
+  producer or consumer, and a delivered item goes to exactly one awaiting
+  consumer. The `Receiver` is also a `Stream`.
 - **`oneshot`** — a single value sent once; the `Receiver` is itself a `Future`.
 
 Every awaitable method returns a named `Unpin` + [`FusedFuture`] type, so it
@@ -57,6 +61,12 @@ assert_eq!(rx.try_recv(), Ok(1));
 tx.send(2).await.unwrap();
 assert_eq!(rx.recv().await, Some(2));
 
+// mpmc — Sender AND Receiver are Clone
+let (tx, rx) = lochan::mpmc::unbounded::<u32>();
+let rx2 = rx.clone(); // a second consumer
+tx.try_send(3).unwrap();
+assert_eq!(rx2.try_recv(), Ok(3));
+
 // oneshot — the Receiver is the future
 let (tx, rx) = lochan::oneshot::channel::<u32>();
 tx.send(42).unwrap();
@@ -67,21 +77,28 @@ assert_eq!(rx.await, Ok(42));
 
 A throughput comparison against the other single-threaded (`!Send`) channel
 crates, [`local-sync`] and [`local-channel`], measured with `cargo bench`
-(criterion). Each `mpsc` row buffers 1024 `u32` values then drains them on a
-single task; `oneshot` times one create + send + receive. `local-channel`
-provides only an unbounded `mpsc`.
+(criterion). Each buffer + drain row queues 1024 `u32` values then drains them on
+a single task; `oneshot` times one create + send + receive. `local-channel`
+provides only an unbounded `mpsc`. There is no other `!Send` multi-consumer
+channel, so `mpmc` is measured against the same single-consumer peers (one
+consumer).
 
 | benchmark (1024 elements) | `lochan` | `local-sync` | `local-channel` |
 | --- | --- | --- | --- |
-| `mpsc` unbounded — buffer + drain | 6.5 µs · 158 Melem/s | 6.5 µs · 158 Melem/s | 6.4 µs · 160 Melem/s |
-| `mpsc` bounded — buffer + drain | 6.3 µs · 163 Melem/s | 12.6 µs · 82 Melem/s | — |
-| `oneshot` — create + send + recv | 19.0 ns | 19.6 ns | — |
+| `mpsc` unbounded — buffer + drain | 6.3 µs · 163 Melem/s | 5.9 µs · 172 Melem/s | 6.0 µs · 172 Melem/s |
+| `mpmc` unbounded — buffer + drain | 7.8 µs · 131 Melem/s | 5.9 µs · 172 Melem/s | 6.0 µs · 172 Melem/s |
+| `mpsc` bounded — buffer + drain | 5.7 µs · 181 Melem/s | 13.1 µs · 78 Melem/s | — |
+| `mpmc` bounded — buffer + drain | 7.4 µs · 138 Melem/s | 13.1 µs · 78 Melem/s | — |
+| `oneshot` — create + send + recv | 18.2 ns | 19.6 ns | — |
 
 Indicative only — laptop run-to-run variance is ±10–15%, so compare *within* one
 `cargo bench` run rather than against the absolute figures. On that basis,
-`lochan` is on par with `local-sync` on the unbounded channel and on `oneshot`,
-and ~2× faster on the bounded channel (its fixed `MaybeUninit` ring beats
-`local-sync`'s semaphore-gated bounded queue).
+`lochan`'s `mpsc` is on par with `local-sync` on the unbounded channel and on
+`oneshot`, and ~2× faster on the bounded channel (its fixed `MaybeUninit` ring
+beats `local-sync`'s semaphore-gated bounded queue). `mpmc` adds ~25–30% over
+`mpsc` for its multi-consumer machinery — the receiver-waker list and the
+panic-safe redelivery slot — yet still runs ~1.7× faster than `local-sync` on
+the bounded path.
 
 ## License
 
