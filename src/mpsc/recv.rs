@@ -45,6 +45,21 @@ impl<T> Future for Recv<'_, T> {
       return Poll::Ready(None);
     }
     chan.register_recv_waker(cx.waker());
+    // RECHECK: register_recv_waker's clone/drop callbacks may have pushed an item or
+    // dropped the last sender; re-check so a wake delivered during registration is not
+    // lost. We do NOT clear the just-registered waker on the Ready branches — dropping
+    // it could panic and lose the popped item. It is stale only on this rare re-entrant
+    // path, and is dropped at a safe point (the next registration, wake, or receiver
+    // drop) where no popped item is in flight.
+    if let Some(item) = chan.pop() {
+      chan.wake_senders();
+      this.done = true;
+      return Poll::Ready(Some(item));
+    }
+    if chan.senders() == 0 {
+      this.done = true;
+      return Poll::Ready(None);
+    }
     Poll::Pending
   }
 }
@@ -52,5 +67,15 @@ impl<T> Future for Recv<'_, T> {
 impl<T> FusedFuture for Recv<'_, T> {
   fn is_terminated(&self) -> bool {
     self.done
+  }
+}
+
+impl<T> Drop for Recv<'_, T> {
+  fn drop(&mut self) {
+    // A canceled (dropped-while-pending) recv clears its registered waker so it is
+    // not retained until a later send or channel drop.
+    if !self.done {
+      self.receiver.chan().clear_recv_waker();
+    }
   }
 }

@@ -116,3 +116,98 @@ fn drop_releases_unreceived_value() {
   drop(rx); // receiver drops without receiving → the value is released
   assert_eq!(count.get(), 1);
 }
+
+#[test]
+fn receiver_drop_with_panicking_payload_drops_once() {
+  use std::panic::{catch_unwind, AssertUnwindSafe};
+
+  let drops = Rc::new(Cell::new(0));
+  #[derive(Debug)]
+  struct PanicOnDrop(Rc<Cell<usize>>);
+  impl Drop for PanicOnDrop {
+    fn drop(&mut self) {
+      self.0.set(self.0.get() + 1);
+      panic!("payload drop panics");
+    }
+  }
+
+  let (tx, rx) = channel::<PanicOnDrop>();
+  tx.send(PanicOnDrop(drops.clone())).unwrap();
+  // Dropping the receiver runs the panicking payload Drop; the panic must NOT
+  // cause a second drop of the same slot via Inner::drop.
+  let _ = catch_unwind(AssertUnwindSafe(|| drop(rx)));
+  assert_eq!(drops.get(), 1);
+}
+
+#[test]
+fn recv_waker_registration_runs_vtable_outside_borrow() {
+  use super::Inner;
+  use core::task::{RawWaker, RawWakerVTable, Waker};
+
+  // A raw waker whose clone AND drop callbacks re-enter recv-waker registration —
+  // which double-borrows recv_waker if they run while it is held.
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    let inner = unsafe { &*(p as *const Inner<u32>) };
+    inner.register_recv_waker(&futures::task::noop_waker());
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  unsafe fn vt_drop(p: *const ()) {
+    let inner = unsafe { &*(p as *const Inner<u32>) };
+    inner.register_recv_waker(&futures::task::noop_waker());
+  }
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_noop, vt_noop, vt_drop);
+
+  let (tx, rx) = channel::<u32>();
+  let reentrant =
+    unsafe { Waker::from_raw(RawWaker::new(Rc::as_ptr(&rx.inner) as *const (), &VT)) };
+  rx.inner.register_recv_waker(&reentrant); // clone re-enters register
+  rx.inner.register_recv_waker(&futures::task::noop_waker()); // replace drops the clone → re-enters
+  let _ = tx;
+}
+
+#[test]
+fn dropping_pending_receiver_clears_its_waker() {
+  let (tx, mut rx) = channel::<u32>();
+  let cw = Arc::new(CountingWaker(AtomicUsize::new(0)));
+  let w = waker(cw.clone());
+  assert!(poll_once(&mut rx, &w).is_pending()); // parks, registers a waker clone
+  assert_eq!(Arc::strong_count(&cw), 3); // cw + w + the registered clone
+  drop(rx); // Receiver::drop clears the registered waker
+  assert_eq!(Arc::strong_count(&cw), 2); // back to cw + w
+  let _ = tx;
+}
+
+#[test]
+fn receiver_delivers_rechecked_value_despite_a_panicking_recv_waker_drop() {
+  use super::Inner;
+  use core::task::{Context, RawWaker, RawWakerVTable, Waker};
+
+  // A waker whose CLONE delivers the value (so the recheck finds one) and whose DROP
+  // panics — but whose WAKE is a no-op, so teardown can consume it without dropping.
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    let inner = unsafe { &*(p as *const Inner<u32>) };
+    unsafe { (*inner.value.get()).write(42) };
+    inner.value_present.set(true);
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  unsafe fn vt_drop(_: *const ()) {
+    panic!("recv waker drop panics");
+  }
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_noop, vt_noop, vt_drop);
+
+  let (_tx, mut rx) = channel::<u32>();
+  let waker = unsafe { Waker::from_raw(RawWaker::new(Rc::as_ptr(&rx.inner) as *const (), &VT)) };
+
+  // value absent → register (the clone delivers 42) → recheck → Ok(42). The recheck no
+  // longer clears the recv waker inline, so the panicking-drop waker is not dropped here
+  // and the value is delivered.
+  assert!(matches!(
+    Pin::new(&mut rx).poll(&mut Context::from_waker(&waker)),
+    Poll::Ready(Ok(42))
+  ));
+  // Consume the leftover waker clones by waking (a no-op) rather than dropping them.
+  rx.inner.wake_receiver();
+  waker.wake();
+}

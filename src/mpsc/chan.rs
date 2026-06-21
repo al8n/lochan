@@ -1,10 +1,9 @@
 //! The shared, `!Send`, no-atomics channel core.
 
 use alloc::{rc::Rc, vec::Vec};
-use core::{
-  cell::{Cell, RefCell},
-  task::Waker,
-};
+use core::{cell::Cell, task::Waker};
+
+use crate::cell::LocalCell;
 
 use super::{list::BlockList, ring::Ring};
 
@@ -63,30 +62,26 @@ impl<T> Flavor<T> {
       Self::Unbounded(l) => l.pop(),
     }
   }
-
-  fn clear(&mut self) {
-    match self {
-      Self::Bounded(r) => r.clear(),
-      Self::Unbounded(l) => l.clear(),
-    }
-  }
 }
 
-/// Shared state behind every `mpsc` handle. Holds `Rc`/`Cell`/`RefCell` — never
+/// Shared state behind every `mpsc` handle. Holds `Rc`/`Cell`/`LocalCell` — never
 /// atomics — so it is `!Send`: a single thread owns both ends and cannot race
-/// itself, which is what lets `poll` register-then-return without a recheck.
+/// itself, which is what lets `poll` register-then-recheck without a lock.
 pub(super) struct Chan<T> {
-  flavor: RefCell<Flavor<T>>,
+  flavor: LocalCell<Flavor<T>>,
   /// Live sender count. Once it hits zero the receiver drains what is queued and
   /// then reports disconnect.
   senders: Cell<usize>,
   /// Cleared when the single receiver drops; sends then fail closed.
   receiver_alive: Cell<bool>,
   /// The receiver's waker, woken when an item is pushed or the last sender drops.
-  recv_waker: RefCell<Option<Waker>>,
-  /// Wakers of senders parked on a full bounded channel, woken (all) when a slot
-  /// frees or the receiver drops.
-  send_wakers: RefCell<Vec<Waker>>,
+  recv_waker: LocalCell<Option<Waker>>,
+  /// Wakers of senders parked on a full bounded channel, each tagged with a stable
+  /// registration id so a future can remove exactly its own entry (rather than rely
+  /// on the best-effort `Waker::will_wake`).
+  send_wakers: LocalCell<Vec<(u64, Waker)>>,
+  /// Source of stable send-waker registration ids.
+  next_send_id: Cell<u64>,
 }
 
 impl<T> Chan<T> {
@@ -100,11 +95,12 @@ impl<T> Chan<T> {
 
   fn new(flavor: Flavor<T>) -> Rc<Self> {
     Rc::new(Self {
-      flavor: RefCell::new(flavor),
+      flavor: LocalCell::new(flavor),
       senders: Cell::new(1),
       receiver_alive: Cell::new(true),
-      recv_waker: RefCell::new(None),
-      send_wakers: RefCell::new(Vec::new()),
+      recv_waker: LocalCell::new(None),
+      send_wakers: LocalCell::new(Vec::new()),
+      next_send_id: Cell::new(0),
     })
   }
 
@@ -149,26 +145,79 @@ impl<T> Chan<T> {
   }
 
   pub(super) fn wake_receiver(&self) {
-    if let Some(waker) = self.recv_waker.borrow_mut().take() {
-      waker.wake();
-    }
-  }
-
-  pub(super) fn wake_senders(&self) {
-    for waker in self.send_wakers.borrow_mut().drain(..) {
+    // Take the waker out and drop the borrow BEFORE waking: a synchronous waker may
+    // re-enter and register again, which would double-borrow `recv_waker`.
+    let waker = self.recv_waker.borrow_mut().take();
+    if let Some(waker) = waker {
       waker.wake();
     }
   }
 
   pub(super) fn register_recv_waker(&self, waker: &Waker) {
-    *self.recv_waker.borrow_mut() = Some(waker.clone());
+    // Tombstone: once the receiver is gone (or mid-drop), ignore registration — the
+    // only caller then is a re-entrant waker drop, which must not repopulate
+    // `recv_waker` and have it retained while a `Sender` keeps `Chan` alive.
+    if !self.receiver_alive.get() {
+      return;
+    }
+    // Clone OUTSIDE the borrow, and drop any replaced waker only AFTER it is released:
+    // a raw-waker clone/drop callback may re-enter the channel.
+    let waker = waker.clone();
+    let old = self.recv_waker.borrow_mut().replace(waker);
+    drop(old);
   }
 
-  pub(super) fn register_send_waker(&self, waker: &Waker) {
-    let mut wakers = self.send_wakers.borrow_mut();
-    if !wakers.iter().any(|w| w.will_wake(waker)) {
-      wakers.push(waker.clone());
+  /// Clears the receiver's registered waker — used when a pending `recv` is canceled,
+  /// so its waker is not retained until a later send or channel drop. Drops the old
+  /// waker after releasing the borrow.
+  pub(super) fn clear_recv_waker(&self) {
+    let old = self.recv_waker.borrow_mut().take();
+    drop(old);
+  }
+
+  /// Registers a parked sender's waker, returning a stable id for later removal.
+  /// Clones outside the borrow.
+  pub(super) fn add_send_waker(&self, waker: &Waker) -> u64 {
+    let waker = waker.clone();
+    let id = self.next_send_id.get();
+    self.next_send_id.set(id.wrapping_add(1));
+    self.send_wakers.borrow_mut().push((id, waker));
+    id
+  }
+
+  /// Removes the send-waker registered under `id`, if still present, dropping it only
+  /// AFTER the borrow is released (its drop callback may re-enter the channel).
+  pub(super) fn remove_send_waker(&self, id: u64) {
+    let removed = {
+      let mut wakers = self.send_wakers.borrow_mut();
+      wakers
+        .iter()
+        .position(|(wid, _)| *wid == id)
+        .map(|pos| wakers.swap_remove(pos))
+    };
+    drop(removed);
+  }
+
+  pub(super) fn wake_senders(&self) {
+    // Move the buffer out — dropping the borrow BEFORE waking, since a waker may
+    // re-enter and re-borrow `send_wakers` — then wake every parked sender even if one
+    // waker panics: a panicking wake must not strand the others (their futures would
+    // stay Pending forever). A guard wakes whatever is left on unwind.
+    let wakers = core::mem::take(&mut *self.send_wakers.borrow_mut());
+    struct WakeRest(Vec<(u64, Waker)>);
+    impl Drop for WakeRest {
+      fn drop(&mut self) {
+        for (_id, waker) in core::mem::take(&mut self.0) {
+          waker.wake();
+        }
+      }
     }
+    let mut rest = WakeRest(wakers);
+    while let Some((_id, waker)) = rest.0.pop() {
+      waker.wake();
+    }
+    // `rest` drops here (or on unwind): its `Drop` wakes whatever remains — nothing on
+    // the normal path — and frees the buffer. (No `forget`: that would leak the `Vec`.)
   }
 
   /// Pushes if there is room; returns `Err(item)` when a bounded channel is full.
@@ -180,9 +229,22 @@ impl<T> Chan<T> {
     self.flavor.borrow_mut().pop()
   }
 
-  /// Drops every queued item, releasing their memory at once. Used on receiver drop:
-  /// the items are unreachable, but a live sender keeps `Chan` alive.
+  /// Drops every queued item. Used on receiver drop: the items are unreachable, but a
+  /// live sender keeps `Chan` alive. Each payload's `Drop` runs OUTSIDE the flavor
+  /// borrow (a re-entrant payload destructor may re-borrow the channel). A guard
+  /// re-enters on unwind, so a single panicking payload `Drop` cannot strand the rest
+  /// of the queue — remaining items may own `Sender`s (an `Rc` cycle).
   pub(super) fn drain(&self) {
-    self.flavor.borrow_mut().clear();
+    struct ContinueOnUnwind<'a, T>(&'a Chan<T>);
+    impl<T> Drop for ContinueOnUnwind<'_, T> {
+      fn drop(&mut self) {
+        self.0.drain();
+      }
+    }
+    let guard = ContinueOnUnwind(self);
+    while let Some(item) = self.pop() {
+      drop(item);
+    }
+    core::mem::forget(guard);
   }
 }

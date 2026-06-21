@@ -139,9 +139,22 @@ impl<T> Receiver<T> {
 impl<T> Drop for Receiver<T> {
   fn drop(&mut self) {
     self.chan.clear_receiver();
-    // Free queued-but-unreceived payloads now; a live sender keeps `Chan` alive.
-    self.chan.drain();
-    // Wake parked senders so their `send` observes the close.
+    // Arm the drain guard so the queue is freed even if anything below panics: a queued
+    // payload may own a `Sender` (an `Rc` cycle through `Chan`), so a skipped drain would
+    // leak it. Senders are woken before any payload `Drop` runs, so a panicking payload
+    // cannot strand them parked.
+    struct DrainOnDrop<'a, T>(&'a Chan<T>);
+    impl<T> Drop for DrainOnDrop<'_, T> {
+      fn drop(&mut self) {
+        self.0.drain();
+      }
+    }
+    let drain = DrainOnDrop(&self.chan);
     self.chan.wake_senders();
+    // Clear any waker left registered by a recheck-Ready completion, so it is not
+    // retained while a `Sender` keeps `Chan` alive. The guard still drains if this
+    // (waker drop) panics.
+    self.chan.clear_recv_waker();
+    drop(drain);
   }
 }
