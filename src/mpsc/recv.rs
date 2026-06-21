@@ -34,35 +34,14 @@ impl<T> Future for Recv<'_, T> {
   #[inline]
   fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
     let this = self.get_mut();
-    let chan = this.receiver.chan();
-    if let Some(item) = chan.pop() {
-      // A slot freed — wake parked senders (bounded backpressure).
-      chan.wake_senders();
+    // Delegate to the shared, golden panic-safe recv path; record completion so the
+    // `FusedFuture`/`Drop` (cancellation) logic below can tell a finished recv from a
+    // parked one.
+    let polled = this.receiver.poll_recv(cx);
+    if polled.is_ready() {
       this.done = true;
-      return Poll::Ready(Some(item));
     }
-    if chan.senders() == 0 {
-      // Empty and every sender is gone — the channel is disconnected.
-      this.done = true;
-      return Poll::Ready(None);
-    }
-    chan.register_recv_waker(cx.waker());
-    // RECHECK: register_recv_waker's clone/drop callbacks may have pushed an item or
-    // dropped the last sender; re-check so a wake delivered during registration is not
-    // lost. We do NOT clear the just-registered waker on the Ready branches — dropping
-    // it could panic and lose the popped item. It is stale only on this rare re-entrant
-    // path, and is dropped at a safe point (the next registration, wake, or receiver
-    // drop) where no popped item is in flight.
-    if let Some(item) = chan.pop() {
-      chan.wake_senders();
-      this.done = true;
-      return Poll::Ready(Some(item));
-    }
-    if chan.senders() == 0 {
-      this.done = true;
-      return Poll::Ready(None);
-    }
-    Poll::Pending
+    polled
   }
 }
 

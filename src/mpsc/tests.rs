@@ -854,3 +854,55 @@ fn recv_recheck_observes_disconnect_during_registration() {
     Poll::Ready(None)
   );
 }
+
+#[test]
+fn stream_collects_queued_items_until_disconnect() {
+  use futures::{executor::block_on, StreamExt};
+  let (tx, rx) = unbounded::<u32>();
+  tx.try_send(1).unwrap();
+  tx.try_send(2).unwrap();
+  tx.try_send(3).unwrap();
+  drop(tx); // disconnect → the stream ends once drained
+  assert_eq!(block_on(rx.collect::<Vec<_>>()), vec![1, 2, 3]);
+}
+
+#[test]
+fn stream_poll_next_parks_then_wakes_on_send() {
+  use futures_core::Stream;
+  let (tx, mut rx) = unbounded::<u32>();
+  let (w, cw) = counting_waker();
+  assert!(Pin::new(&mut rx)
+    .poll_next(&mut Context::from_waker(&w))
+    .is_pending());
+  assert_eq!(cw.0.load(Ordering::SeqCst), 0);
+  tx.try_send(9).unwrap();
+  assert_eq!(cw.0.load(Ordering::SeqCst), 1);
+  assert_eq!(
+    Pin::new(&mut rx).poll_next(&mut Context::from_waker(&w)),
+    Poll::Ready(Some(9))
+  );
+}
+
+#[test]
+fn fused_stream_terminates_once_drained_and_disconnected() {
+  use futures_core::stream::FusedStream;
+  let (tx, mut rx) = unbounded::<u32>();
+  tx.try_send(1).unwrap();
+  drop(tx);
+  assert!(!rx.is_terminated()); // an item is still queued
+  assert_eq!(rx.try_recv(), Ok(1));
+  assert!(rx.is_terminated()); // drained and every sender gone
+}
+
+#[test]
+fn try_iter_drains_ready_items_without_blocking() {
+  let (tx, mut rx) = unbounded::<u32>();
+  tx.try_send(1).unwrap();
+  tx.try_send(2).unwrap();
+  let drained: Vec<u32> = rx.try_iter().collect();
+  assert_eq!(drained, vec![1, 2]);
+  // try_iter stops at Empty rather than waiting; the receiver stays usable.
+  assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+  tx.try_send(3).unwrap();
+  assert_eq!(rx.try_recv(), Ok(3));
+}

@@ -144,21 +144,42 @@ impl<T> Receiver<T> {
   /// Takes the value without waiting: `Ok(Some(v))` if it has arrived, `Ok(None)` if
   /// not yet, `Err(Canceled)` if the sender dropped without sending.
   pub fn try_recv(&mut self) -> Result<Option<T>, Canceled> {
+    if let Some(value) = self.take_value() {
+      return Ok(Some(value));
+    }
+    // `take_value` returns `None` when already done, when nothing has been sent yet, or
+    // when the sender canceled — surface the canceled case here.
+    if !self.done && self.inner.sender_dropped.get() {
+      self.done = true;
+      return Err(Canceled);
+    }
+    Ok(None)
+  }
+
+  /// Takes a delivered value if one is present, WITHOUT observing cancellation, so a
+  /// later poll/await still sees [`Canceled`]. This is what [`try_iter`](Self::try_iter)
+  /// drains: routing it through [`try_recv`](Self::try_recv) would consume the canceled
+  /// terminal (setting `done`) yet report it as `None`, stranding a later await on
+  /// `Pending`.
+  fn take_value(&mut self) -> Option<T> {
     if self.done {
-      return Ok(None);
+      return None;
     }
     if self.inner.value_present.replace(false) {
       // SAFETY: the flag was true, so the slot held an initialized value; read it
       // out exactly once (the flag is already cleared).
       let value = unsafe { (*self.inner.value.get()).assume_init_read() };
       self.done = true;
-      return Ok(Some(value));
+      return Some(value);
     }
-    if self.inner.sender_dropped.get() {
-      self.done = true;
-      return Err(Canceled);
-    }
-    Ok(None)
+    None
+  }
+
+  /// Returns an iterator that yields the value if it has arrived (at most one item),
+  /// without waiting.
+  #[inline]
+  pub fn try_iter(&mut self) -> TryIter<'_, T> {
+    TryIter(self)
   }
 }
 
@@ -218,6 +239,19 @@ impl<T> Drop for Receiver<T> {
     // The sender may have sent a value we never received; drop it (flag-first, so a
     // panicking `T::drop` cannot double-drop via `Inner::drop`).
     self.inner.drop_value();
+  }
+}
+
+/// A non-blocking iterator over a [`Receiver`], returned by [`Receiver::try_iter`]. It
+/// yields the value if it has arrived (at most one item), then `None`.
+pub struct TryIter<'a, T>(&'a mut Receiver<T>);
+
+impl<T> Iterator for TryIter<'_, T> {
+  type Item = T;
+
+  #[inline]
+  fn next(&mut self) -> Option<T> {
+    self.0.take_value()
   }
 }
 
