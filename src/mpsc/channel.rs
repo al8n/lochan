@@ -1,6 +1,6 @@
 //! The `mpsc` channel handles, [`Sender`] and [`Receiver`], shared by both flavors.
 
-use alloc::rc::Rc;
+use std::rc::Rc;
 
 use super::{
   chan::Chan,

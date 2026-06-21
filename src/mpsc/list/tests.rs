@@ -1,7 +1,7 @@
 use super::*;
 
-use alloc::rc::Rc;
 use core::cell::Cell;
+use std::rc::Rc;
 
 #[test]
 fn push_pop_within_one_block() {

@@ -7,13 +7,13 @@
 //! memory tracks live usage. Single-threaded, so the links are plain `Cell` /
 //! `NonNull`, never atomics.
 
-use alloc::boxed::Box;
 use core::{
   cell::{Cell, UnsafeCell},
   marker::PhantomData,
   mem::MaybeUninit,
   ptr::{addr_of_mut, NonNull},
 };
+use std::boxed::Box;
 
 /// One block: a fixed array of `N` slots plus the link to the next block. Slots
 /// `[begin, end)` are initialized; `[0, begin)` were read out, `[end, N)` are

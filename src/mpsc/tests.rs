@@ -1,6 +1,5 @@
 use super::*;
 
-use alloc::{rc::Rc, sync::Arc};
 use core::{
   cell::Cell,
   future::Future,
@@ -8,6 +7,7 @@ use core::{
   sync::atomic::{AtomicUsize, Ordering},
   task::{Context, Poll},
 };
+use std::{rc::Rc, sync::Arc};
 
 use futures::{
   future::FusedFuture,

@@ -1,7 +1,7 @@
 //! The shared, `!Send`, no-atomics channel core.
 
-use alloc::{rc::Rc, vec::Vec};
 use core::{cell::Cell, task::Waker};
+use std::{rc::Rc, vec::Vec};
 
 use crate::cell::LocalCell;
 

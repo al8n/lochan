@@ -80,3 +80,6 @@ Copyright (c) 2026 Al Liu.
 [crates-url]: https://crates.io/crates/lochan
 [zh-cn-url]: https://github.com/al8n/lochan/tree/main/README-zh_CN.md
 [`FusedFuture`]: https://docs.rs/futures-core/latest/futures_core/future/trait.FusedFuture.html
+[codecov-url]: https://app.codecov.io/gh/al8n/lochan/
+[doc-url]: https://docs.rs/lochan
+[crates-url]: https://crates.io/crates/lochan

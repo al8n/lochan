@@ -1,7 +1,7 @@
 //! Fixed-capacity ring buffer backing the bounded flavor.
 
-use alloc::{boxed::Box, vec::Vec};
 use core::mem::MaybeUninit;
+use std::{boxed::Box, vec::Vec};
 
 /// A fixed-capacity ring of `MaybeUninit` slots: exactly `cap` slots in one
 /// allocation, with `head`/`len` marking the initialized region

@@ -4,7 +4,6 @@
 //! itself); the [`Receiver`] is itself a `Future` (await it) and also offers a
 //! non-blocking [`Receiver::try_recv`].
 
-use alloc::rc::Rc;
 use core::{
   cell::{Cell, UnsafeCell},
   fmt,
@@ -13,6 +12,7 @@ use core::{
   pin::Pin,
   task::{Context, Poll, Waker},
 };
+use std::rc::Rc;
 
 use futures_core::future::FusedFuture;
 
