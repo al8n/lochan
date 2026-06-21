@@ -76,16 +76,15 @@ provides only an unbounded `mpsc`.
 
 | benchmark (1024 elements) | `lochan` | `local-sync` | `local-channel` |
 | --- | --- | --- | --- |
-| `mpsc` unbounded — buffer + drain | 6.7 µs · 154 Melem/s | 6.1 µs · 168 Melem/s | 6.0 µs · 170 Melem/s |
-| `mpsc` bounded — buffer + drain | 6.3 µs · 164 Melem/s | 12.4 µs · 83 Melem/s | — |
-| `oneshot` — create + send + recv | 18.2 ns | 19.5 ns | — |
+| `mpsc` unbounded — buffer + drain | 6.5 µs · 158 Melem/s | 6.5 µs · 158 Melem/s | 6.4 µs · 160 Melem/s |
+| `mpsc` bounded — buffer + drain | 6.3 µs · 163 Melem/s | 12.6 µs · 82 Melem/s | — |
+| `oneshot` — create + send + recv | 19.0 ns | 19.6 ns | — |
 
-Indicative numbers from one machine in release mode — reproduce with
-`cargo bench`. `lochan`'s fixed-ring `bounded` channel is roughly 2× faster than
-`local-sync`'s here and its `oneshot` is on par; the segmented-block-list
-`unbounded` channel lands within ~10% — the remaining gap is `lochan`'s unified
-`Chan` (one type serves both flavors) where `local-sync` monomorphizes separate
-bounded and unbounded types.
+Indicative only — laptop run-to-run variance is ±10–15%, so compare *within* one
+`cargo bench` run rather than against the absolute figures. On that basis,
+`lochan` is on par with `local-sync` on the unbounded channel and on `oneshot`,
+and ~2× faster on the bounded channel (its fixed `MaybeUninit` ring beats
+`local-sync`'s semaphore-gated bounded queue).
 
 #### License
 

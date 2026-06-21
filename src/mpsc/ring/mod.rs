@@ -42,6 +42,7 @@ impl<T> Ring<T> {
   }
 
   /// Appends an item, or hands it back via `Err` when the ring is full.
+  #[inline(always)]
   pub(super) fn push(&mut self, item: T) -> Result<(), T> {
     if self.is_full() {
       return Err(item);
@@ -56,6 +57,7 @@ impl<T> Ring<T> {
   }
 
   /// Removes and returns the oldest item, or `None` when empty.
+  #[inline(always)]
   pub(super) fn pop(&mut self) -> Option<T> {
     if self.len == 0 {
       return None;

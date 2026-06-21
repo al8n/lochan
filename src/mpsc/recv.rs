@@ -19,6 +19,7 @@ pub struct Recv<'a, T> {
 }
 
 impl<'a, T> Recv<'a, T> {
+  #[inline(always)]
   pub(super) fn new(receiver: &'a mut Receiver<T>) -> Self {
     Self {
       receiver,
@@ -30,6 +31,7 @@ impl<'a, T> Recv<'a, T> {
 impl<T> Future for Recv<'_, T> {
   type Output = Option<T>;
 
+  #[inline]
   fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
     let this = self.get_mut();
     let chan = this.receiver.chan();
@@ -71,6 +73,7 @@ impl<T> FusedFuture for Recv<'_, T> {
 }
 
 impl<T> Drop for Recv<'_, T> {
+  #[inline]
   fn drop(&mut self) {
     // A canceled (dropped-while-pending) recv clears its registered waker so it is
     // not retained until a later send or channel drop.

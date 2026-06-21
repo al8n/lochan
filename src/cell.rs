@@ -47,14 +47,17 @@ mod unchecked {
       Self(UnsafeCell::new(value))
     }
 
+    #[inline(always)]
     pub(crate) fn borrow(&self) -> LocalRef<'_, T> {
       // SAFETY: `!Send` single-threaded use with no overlapping borrow of this cell —
       // no vtable callback or user `Drop` runs while a borrow is live.
       LocalRef(unsafe { &*self.0.get() })
     }
 
-    #[allow(clippy::mut_from_ref)] // deliberate interior mutability; soundness is the
-                                   // no-overlap invariant, dynamically checked in debug and by Miri in both builds.
+    #[allow(clippy::mut_from_ref)]
+    // deliberate interior mutability; soundness is the
+    // no-overlap invariant, dynamically checked in debug and by Miri in both builds.
+    #[inline(always)]
     pub(crate) fn borrow_mut(&self) -> LocalRefMut<'_, T> {
       // SAFETY: as above — this borrow does not overlap any other borrow of the cell.
       LocalRefMut(unsafe { &mut *self.0.get() })

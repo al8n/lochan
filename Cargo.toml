@@ -27,8 +27,8 @@ futures-core = { version = "0.3", default-features = false }
 [dev-dependencies]
 criterion = "0.8"
 futures = { version = "0.3", features = ["executor"] }
-local-channel = "0.1.5"
-local-sync = "0.1.1"
+local-channel = "0.1"
+local-sync = "0.1"
 
 [profile.bench]
 opt-level = 3

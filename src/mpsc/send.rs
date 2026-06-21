@@ -26,6 +26,7 @@ pub struct Send<'a, T> {
 }
 
 impl<'a, T> Send<'a, T> {
+  #[inline(always)]
   pub(super) fn new(sender: &'a Sender<T>, item: T) -> Self {
     Self {
       sender,
@@ -40,6 +41,7 @@ impl<'a, T> Send<'a, T> {
   /// (deregister this future's waker; wake the receiver on success). The outcome is
   /// recorded BEFORE any user code runs, so a panicking waker leaves it recoverable —
   /// a re-poll replays it.
+  #[inline]
   fn commit(
     &mut self,
     result: Result<(), SendError<T>>,
@@ -61,6 +63,7 @@ impl<'a, T> Send<'a, T> {
 impl<T> Future for Send<'_, T> {
   type Output = Result<(), SendError<T>>;
 
+  #[inline]
   fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
     // SAFETY: `Send` holds no self-referential state — `sender` is a reference, and
     // `item`/`outcome` are moved by value — so projecting `&mut Self` out of the
@@ -121,6 +124,7 @@ impl<T> FusedFuture for Send<'_, T> {
 }
 
 impl<T> Drop for Send<'_, T> {
+  #[inline]
   fn drop(&mut self) {
     // Remove a still-registered waker (a future dropped while parked). A completed
     // future already cleared its registration in `commit`.

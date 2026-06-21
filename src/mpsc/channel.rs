@@ -23,6 +23,7 @@ impl<T> Sender<T> {
   /// Pushes an item without waiting. Returns [`TrySendError::Full`] when the channel
   /// is at capacity, or [`TrySendError::Closed`] when the receiver is gone; either
   /// way the item is carried back.
+  #[inline(always)]
   pub fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
     if !self.chan.receiver_alive() {
       return Err(TrySendError::Closed(item));
@@ -64,6 +65,7 @@ impl<T> Sender<T> {
   /// Returns a future that sends `item`, awaiting capacity when a bounded channel is
   /// full. Resolves to [`SendError`](super::SendError) (carrying the item) if the
   /// receiver is gone. The future is `FusedFuture` (and `Unpin` when `T: Unpin`).
+  #[inline(always)]
   pub fn send(&self, item: T) -> Send<'_, T> {
     Send::new(self, item)
   }
@@ -104,6 +106,7 @@ impl<T> Receiver<T> {
   /// Pops an item without waiting. Returns [`TryRecvError::Empty`] when nothing is
   /// queued, or [`TryRecvError::Disconnected`] when the queue is empty and every
   /// sender has dropped.
+  #[inline(always)]
   pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
     match self.chan.pop() {
       Some(item) => {
@@ -117,6 +120,7 @@ impl<T> Receiver<T> {
 
   /// Returns a future that resolves to the next item, or `None` once the channel is
   /// empty and every sender has dropped. The future is `Unpin` + `FusedFuture`.
+  #[inline(always)]
   pub fn recv(&mut self) -> Recv<'_, T> {
     Recv::new(self)
   }

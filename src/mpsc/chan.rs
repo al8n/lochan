@@ -46,6 +46,7 @@ impl<T> Flavor<T> {
 
   /// Pushes, or hands the item back via `Err` when a bounded channel is full.
   /// Unbounded never fails.
+  #[inline(always)]
   fn try_push(&mut self, item: T) -> Result<(), T> {
     match self {
       Self::Bounded(r) => r.push(item),
@@ -56,6 +57,7 @@ impl<T> Flavor<T> {
     }
   }
 
+  #[inline(always)]
   fn pop(&mut self) -> Option<T> {
     match self {
       Self::Bounded(r) => r.pop(),
@@ -120,6 +122,7 @@ impl<T> Chan<T> {
     self.flavor.borrow().is_full()
   }
 
+  #[inline(always)]
   pub(super) fn receiver_alive(&self) -> bool {
     self.receiver_alive.get()
   }
@@ -144,6 +147,7 @@ impl<T> Chan<T> {
     self.receiver_alive.set(false);
   }
 
+  #[inline(always)]
   pub(super) fn wake_receiver(&self) {
     // Fast path: the receiver is not parked (it is actively draining, or this is a
     // producer still buffering) — nothing to wake. Skips the take + write-back.
@@ -203,6 +207,7 @@ impl<T> Chan<T> {
     drop(removed);
   }
 
+  #[inline(always)]
   pub(super) fn wake_senders(&self) {
     // Fast path: no parked sender to wake — always the case for an unbounded channel,
     // and for a bounded one that is not full. Skips the take + guard below, which are
@@ -232,10 +237,12 @@ impl<T> Chan<T> {
   }
 
   /// Pushes if there is room; returns `Err(item)` when a bounded channel is full.
+  #[inline(always)]
   pub(super) fn try_push(&self, item: T) -> Result<(), T> {
     self.flavor.borrow_mut().try_push(item)
   }
 
+  #[inline(always)]
   pub(super) fn pop(&self) -> Option<T> {
     self.flavor.borrow_mut().pop()
   }

@@ -85,6 +85,7 @@ impl<T, const N: usize> BlockList<T, N> {
     self.len == 0
   }
 
+  #[inline(always)]
   pub(super) fn push(&mut self, item: T) {
     // SAFETY: `tail` always points to a live block this list owns.
     let tail = unsafe { self.tail.as_ref() };
@@ -107,6 +108,7 @@ impl<T, const N: usize> BlockList<T, N> {
     self.len += 1;
   }
 
+  #[inline(always)]
   pub(super) fn pop(&mut self) -> Option<T> {
     loop {
       // SAFETY: `head` always points to a live block this list owns.
