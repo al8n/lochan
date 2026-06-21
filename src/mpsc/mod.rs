@@ -9,10 +9,12 @@ mod bounded;
 mod chan;
 mod error;
 mod list;
+mod recv;
 mod ring;
 
 pub use bounded::{Receiver, Sender};
 pub use error::{TryRecvError, TrySendError};
+pub use recv::Recv;
 
 use chan::Chan;
 

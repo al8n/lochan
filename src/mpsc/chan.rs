@@ -155,10 +155,13 @@ impl<T> Chan<T> {
   }
 
   pub(super) fn wake_senders(&self) {
-    let wakers: Vec<Waker> = self.send_wakers.borrow_mut().drain(..).collect();
-    for waker in wakers {
+    for waker in self.send_wakers.borrow_mut().drain(..) {
       waker.wake();
     }
+  }
+
+  pub(super) fn register_recv_waker(&self, waker: &Waker) {
+    *self.recv_waker.borrow_mut() = Some(waker.clone());
   }
 
   /// Pushes if there is room; returns `Err(item)` when a bounded channel is full.

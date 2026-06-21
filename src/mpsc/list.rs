@@ -46,6 +46,17 @@ impl<T, const N: usize> Block<T, N> {
   }
 }
 
+impl<T, const N: usize> Drop for Block<T, N> {
+  fn drop(&mut self) {
+    let begin = self.begin.get();
+    let end = self.end.get();
+    for i in begin..end {
+      // SAFETY: slot `i` in `[begin, end)` holds an initialized, unread item.
+      unsafe { (*self.values[i].get()).assume_init_drop() };
+    }
+  }
+}
+
 /// An unbounded FIFO over a chain of [`Block`]s. Owns its blocks via raw pointers;
 /// the `PhantomData<T>` records that ownership for drop-check.
 pub(super) struct BlockList<T, const N: usize = 32> {
@@ -134,15 +145,9 @@ impl<T, const N: usize> Drop for BlockList<T, N> {
   fn drop(&mut self) {
     let mut cur = Some(self.head);
     while let Some(ptr) = cur {
-      // SAFETY: every linked pointer came from `Block::alloc`; take ownership back
-      // so the block is freed when `block` drops at the end of the iteration.
+      // SAFETY: every linked pointer came from `Block::alloc`; take ownership back.
+      // `Block::drop` releases the block's unread items; we just walk + free.
       let block = unsafe { Box::from_raw(ptr.as_ptr()) };
-      let begin = block.begin.get();
-      let end = block.end.get();
-      for i in begin..end {
-        // SAFETY: slot `i` in `[begin, end)` holds an initialized, unread item.
-        unsafe { (*block.values[i].get()).assume_init_drop() };
-      }
       cur = block.next.get();
     }
   }

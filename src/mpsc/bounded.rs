@@ -5,6 +5,7 @@ use alloc::rc::Rc;
 use super::{
   chan::Chan,
   error::{TryRecvError, TrySendError},
+  recv::Recv,
 };
 
 /// The sending half of a bounded channel. Cloneable — every clone is another
@@ -100,6 +101,16 @@ impl<T> Receiver<T> {
       None if self.chan.senders() == 0 => Err(TryRecvError::Disconnected),
       None => Err(TryRecvError::Empty),
     }
+  }
+
+  /// Returns a future that resolves to the next item, or `None` once the channel is
+  /// empty and every sender has dropped. The future is `Unpin` + `FusedFuture`.
+  pub fn recv(&mut self) -> Recv<'_, T> {
+    Recv::new(self)
+  }
+
+  pub(super) fn chan(&self) -> &Chan<T> {
+    &self.chan
   }
 
   /// The number of currently-queued items.

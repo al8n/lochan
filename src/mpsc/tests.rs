@@ -1,5 +1,18 @@
 use super::*;
 
+use alloc::sync::Arc;
+use core::{
+  future::Future,
+  pin::Pin,
+  sync::atomic::{AtomicUsize, Ordering},
+  task::{Context, Poll},
+};
+
+use futures::{
+  future::FusedFuture,
+  task::{ArcWake, waker},
+};
+
 #[test]
 fn bounded_try_send_recv_is_fifo() {
   let (tx, mut rx) = bounded::<u32>(4);
@@ -100,4 +113,62 @@ fn unbounded_drains_queue_before_reporting_disconnected() {
   drop(tx);
   assert_eq!(rx.try_recv(), Ok(1));
   assert_eq!(rx.try_recv(), Err(TryRecvError::Disconnected));
+}
+
+struct CountingWaker(AtomicUsize);
+
+impl ArcWake for CountingWaker {
+  fn wake_by_ref(arc: &Arc<Self>) {
+    arc.0.fetch_add(1, Ordering::SeqCst);
+  }
+}
+
+fn counting_waker() -> (core::task::Waker, Arc<CountingWaker>) {
+  let cw = Arc::new(CountingWaker(AtomicUsize::new(0)));
+  (waker(cw.clone()), cw)
+}
+
+fn poll_once<F: Future + Unpin>(fut: &mut F, w: &core::task::Waker) -> Poll<F::Output> {
+  Pin::new(fut).poll(&mut Context::from_waker(w))
+}
+
+#[test]
+fn recv_parks_then_wakes_on_send() {
+  let (tx, mut rx) = bounded::<u32>(1);
+  let (w, cw) = counting_waker();
+  let mut fut = rx.recv();
+  assert!(poll_once(&mut fut, &w).is_pending()); // empty → parks
+  assert_eq!(cw.0.load(Ordering::SeqCst), 0);
+  tx.try_send(5).unwrap(); // wakes the parked recv
+  assert_eq!(cw.0.load(Ordering::SeqCst), 1);
+  assert_eq!(poll_once(&mut fut, &w), Poll::Ready(Some(5)));
+}
+
+#[test]
+fn recv_ready_when_item_available() {
+  let (tx, mut rx) = bounded::<u32>(1);
+  tx.try_send(9).unwrap();
+  let (w, _cw) = counting_waker();
+  let mut fut = rx.recv();
+  assert_eq!(poll_once(&mut fut, &w), Poll::Ready(Some(9)));
+}
+
+#[test]
+fn recv_returns_none_when_disconnected() {
+  let (tx, mut rx) = bounded::<u32>(1);
+  drop(tx);
+  let (w, _cw) = counting_waker();
+  let mut fut = rx.recv();
+  assert_eq!(poll_once(&mut fut, &w), Poll::Ready(None));
+}
+
+#[test]
+fn recv_future_reports_terminated_after_ready() {
+  let (tx, mut rx) = bounded::<u32>(1);
+  tx.try_send(1).unwrap();
+  let (w, _cw) = counting_waker();
+  let mut fut = rx.recv();
+  assert!(!fut.is_terminated());
+  let _ = poll_once(&mut fut, &w);
+  assert!(fut.is_terminated());
 }
