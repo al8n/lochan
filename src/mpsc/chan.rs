@@ -3,68 +3,7 @@
 use core::{cell::Cell, task::Waker};
 use std::{rc::Rc, vec::Vec};
 
-use crate::cell::LocalCell;
-
-use super::{list::BlockList, ring::Ring};
-
-/// The storage backing a channel: a fixed ring (bounded) or a segmented block-list
-/// (unbounded). Dispatch is a single match per operation.
-enum Flavor<T> {
-  Bounded(Ring<T>),
-  Unbounded(BlockList<T>),
-}
-
-impl<T> Flavor<T> {
-  fn len(&self) -> usize {
-    match self {
-      Self::Bounded(r) => r.len(),
-      Self::Unbounded(l) => l.len(),
-    }
-  }
-
-  fn is_empty(&self) -> bool {
-    match self {
-      Self::Bounded(r) => r.is_empty(),
-      Self::Unbounded(l) => l.is_empty(),
-    }
-  }
-
-  /// The capacity, or `None` when unbounded.
-  fn cap(&self) -> Option<usize> {
-    match self {
-      Self::Bounded(r) => Some(r.cap()),
-      Self::Unbounded(_) => None,
-    }
-  }
-
-  fn is_full(&self) -> bool {
-    match self {
-      Self::Bounded(r) => r.is_full(),
-      Self::Unbounded(_) => false,
-    }
-  }
-
-  /// Pushes, or hands the item back via `Err` when a bounded channel is full.
-  /// Unbounded never fails.
-  #[inline(always)]
-  fn try_push(&mut self, item: T) -> Result<(), T> {
-    match self {
-      Self::Bounded(r) => r.push(item),
-      Self::Unbounded(l) => {
-        l.push(item);
-        Ok(())
-      }
-    }
-  }
-
-  #[inline(always)]
-  fn pop(&mut self) -> Option<T> {
-    match self {
-      Self::Bounded(r) => r.pop(),
-      Self::Unbounded(l) => l.pop(),
-    }
-  }
-}
+use crate::{cell::LocalCell, queue::Flavor};
 
 /// Shared state behind every `mpsc` handle. Holds `Rc`/`Cell`/`LocalCell` — never
 /// atomics — so it is `!Send`: a single thread owns both ends and cannot race
@@ -88,11 +27,11 @@ pub(super) struct Chan<T> {
 
 impl<T> Chan<T> {
   pub(super) fn bounded(cap: usize) -> Rc<Self> {
-    Self::new(Flavor::Bounded(Ring::with_capacity(cap)))
+    Self::new(Flavor::bounded(cap))
   }
 
   pub(super) fn unbounded() -> Rc<Self> {
-    Self::new(Flavor::Unbounded(BlockList::new()))
+    Self::new(Flavor::unbounded())
   }
 
   fn new(flavor: Flavor<T>) -> Rc<Self> {

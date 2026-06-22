@@ -1,9 +1,12 @@
-//! Multi-producer, single-consumer channel.
+//! Multi-producer, multi-consumer channel.
 //!
-//! `!Send`, no-atomics; [`bounded`] and [`unbounded`] flavors. Senders are `Clone`
-//! (multi-producer); the receiver is single-consumer. Each flavor offers a
-//! non-blocking `try_*` surface and an awaitable `recv` (and, when bounded, `send`)
-//! whose futures are `Unpin` + [`FusedFuture`](futures_core::future::FusedFuture).
+//! `!Send`, no-atomics; [`bounded`] and [`unbounded`] flavors. Both senders and
+//! receivers are `Clone`: every sender clone is another producer, every receiver clone
+//! another consumer. A delivered item goes to exactly one awaiting consumer; the
+//! channel stays open for sends until the last receiver drops, and stays drainable by
+//! receivers until the last sender drops. Each flavor offers a non-blocking `try_*`
+//! surface and an awaitable `recv` (and, when bounded, `send`) whose futures are
+//! `Unpin` + [`FusedFuture`](futures_core::future::FusedFuture).
 
 mod chan;
 mod channel;
@@ -22,8 +25,8 @@ use chan::Chan;
 ///
 /// [`Sender::try_send`] reports [`TrySendError::Full`] when the queue is at capacity.
 /// `cap` must be non-zero: a zero-capacity rendezvous cannot be represented on a
-/// single thread, where the sole sender and receiver share it and a hand-off that
-/// parked the thread would deadlock.
+/// single thread, where every sender and receiver share it and a hand-off that parked
+/// the thread would deadlock.
 ///
 /// # Panics
 ///
@@ -31,7 +34,7 @@ use chan::Chan;
 pub fn bounded<T>(cap: usize) -> (Sender<T>, Receiver<T>) {
   assert!(
     cap > 0,
-    "lochan::mpsc::bounded requires a non-zero capacity"
+    "lochan::mpmc::bounded requires a non-zero capacity"
   );
   let chan = Chan::bounded(cap);
   (Sender::new(chan.clone()), Receiver::new(chan))

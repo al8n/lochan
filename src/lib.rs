@@ -11,6 +11,8 @@ extern crate alloc as std;
 extern crate std;
 
 mod cell;
+mod queue;
 
+pub mod mpmc;
 pub mod mpsc;
 pub mod oneshot;

@@ -59,7 +59,7 @@ impl<T, const N: usize> Drop for Block<T, N> {
 
 /// An unbounded FIFO over a chain of [`Block`]s. Owns its blocks via raw pointers;
 /// the `PhantomData<T>` records that ownership for drop-check.
-pub(super) struct BlockList<T, const N: usize = 32> {
+pub(crate) struct BlockList<T, const N: usize = 32> {
   head: NonNull<Block<T, N>>,
   tail: NonNull<Block<T, N>>,
   len: usize,
