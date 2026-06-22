@@ -1,5 +1,15 @@
 # UNRELEASED
 
+# 0.1.2 (June 22nd, 2026)
+
+FEATURES
+
+- `mpmc` — multi-producer, multi-consumer, in the same `bounded` / `unbounded`
+  flavors as `mpsc`. Both the `Sender` and the `Receiver` are `Clone` (every clone is
+  another producer or consumer), and a delivered item goes to exactly one awaiting
+  consumer. The `Receiver` is also a `Stream`, and `send` / `recv` return named
+  `Unpin` + `FusedFuture` types.
+
 # 0.1.1 (June 21st, 2026)
 
 FEATURES
