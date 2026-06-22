@@ -55,7 +55,7 @@ fn recv_canceled_when_sender_dropped() {
   let (tx, mut rx) = channel::<u32>();
   drop(tx);
   let (w, _cw) = counting_waker();
-  assert_eq!(poll_once(&mut rx, &w), Poll::Ready(Err(Canceled)));
+  assert_eq!(poll_once(&mut rx, &w), Poll::Ready(Err(Canceled(()))));
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn try_recv_lifecycle() {
 fn try_recv_canceled_when_sender_dropped() {
   let (tx, mut rx) = channel::<u32>();
   drop(tx);
-  assert_eq!(rx.try_recv(), Err(Canceled));
+  assert_eq!(rx.try_recv(), Err(Canceled(())));
 }
 
 #[test]
@@ -215,10 +215,10 @@ fn receiver_delivers_rechecked_value_despite_a_panicking_recv_waker_drop() {
 #[test]
 fn canceled_display_and_debug() {
   assert_eq!(
-    format!("{Canceled}"),
+    format!("{}", Canceled(())),
     "oneshot sender dropped without sending a value"
   );
-  assert_eq!(format!("{Canceled:?}"), "Canceled");
+  assert_eq!(format!("{:?}", Canceled(())), "Canceled");
 }
 
 #[test]
@@ -257,5 +257,5 @@ fn try_iter_preserves_cancellation_for_a_later_poll() {
             // later poll still observes `Canceled` instead of hanging on `Pending`.
   assert_eq!(rx.try_iter().next(), None);
   let (w, _cw) = counting_waker();
-  assert_eq!(poll_once(&mut rx, &w), Poll::Ready(Err(Canceled)));
+  assert_eq!(poll_once(&mut rx, &w), Poll::Ready(Err(Canceled(()))));
 }

@@ -32,6 +32,7 @@ struct Inner<T> {
 }
 
 impl<T> Inner<T> {
+  #[inline]
   fn register_recv_waker(&self, waker: &Waker) {
     // Tombstone: once the receiver is dropping, ignore registration — the only caller
     // then is a re-entrant waker drop, which must not repopulate `recv_waker` and have
@@ -42,10 +43,10 @@ impl<T> Inner<T> {
     // Clone OUTSIDE the borrow, and drop any replaced waker only AFTER it is released:
     // a raw-waker clone/drop callback may re-enter the channel.
     let waker = waker.clone();
-    let old = self.recv_waker.borrow_mut().replace(waker);
-    drop(old);
+    let _ = self.recv_waker.borrow_mut().replace(waker);
   }
 
+  #[inline(always)]
   fn wake_receiver(&self) {
     // Take the waker out and drop the borrow BEFORE waking: a synchronous waker may
     // re-enter and register again, which would double-borrow `recv_waker`.
@@ -57,13 +58,14 @@ impl<T> Inner<T> {
 
   /// Clears the receiver's registered waker — used when a pending recv is canceled,
   /// so its waker is not retained. Drops the old waker after releasing the borrow.
+  #[inline(always)]
   fn clear_recv_waker(&self) {
-    let old = self.recv_waker.borrow_mut().take();
-    drop(old);
+    let _ = self.recv_waker.borrow_mut().take();
   }
 
   /// Drops the slot value if present, clearing the flag *before* the drop so a
   /// panicking `T::drop` cannot trigger a second drop via another path.
+  #[inline(always)]
   fn drop_value(&self) {
     if self.value_present.replace(false) {
       // SAFETY: the flag was true, so the slot held an initialized value, and is
@@ -74,6 +76,7 @@ impl<T> Inner<T> {
 }
 
 impl<T> Drop for Inner<T> {
+  #[inline(always)]
   fn drop(&mut self) {
     // Backstop: a sent-but-never-received value (e.g. a leaked receiver) is dropped
     // here. Normally the receiver has already taken or dropped it.
@@ -105,6 +108,7 @@ pub struct Sender<T> {
 
 impl<T> Sender<T> {
   /// Sends `value`. Returns `Err(value)` if the receiver has already dropped.
+  #[inline]
   pub fn send(self, value: T) -> Result<(), T> {
     if self.inner.receiver_dropped.get() {
       return Err(value);
@@ -118,12 +122,14 @@ impl<T> Sender<T> {
   }
 
   /// Returns `true` once the receiver has dropped.
+  #[inline(always)]
   pub fn is_closed(&self) -> bool {
     self.inner.receiver_dropped.get()
   }
 }
 
 impl<T> Drop for Sender<T> {
+  #[inline(always)]
   fn drop(&mut self) {
     self.inner.sender_dropped.set(true);
     if !self.inner.value_present.get() {
@@ -143,6 +149,7 @@ pub struct Receiver<T> {
 impl<T> Receiver<T> {
   /// Takes the value without waiting: `Ok(Some(v))` if it has arrived, `Ok(None)` if
   /// not yet, `Err(Canceled)` if the sender dropped without sending.
+  #[inline]
   pub fn try_recv(&mut self) -> Result<Option<T>, Canceled> {
     if let Some(value) = self.take_value() {
       return Ok(Some(value));
@@ -151,7 +158,7 @@ impl<T> Receiver<T> {
     // when the sender canceled — surface the canceled case here.
     if !self.done && self.inner.sender_dropped.get() {
       self.done = true;
-      return Err(Canceled);
+      return Err(Canceled(()));
     }
     Ok(None)
   }
@@ -161,6 +168,7 @@ impl<T> Receiver<T> {
   /// drains: routing it through [`try_recv`](Self::try_recv) would consume the canceled
   /// terminal (setting `done`) yet report it as `None`, stranding a later await on
   /// `Pending`.
+  #[inline]
   fn take_value(&mut self) -> Option<T> {
     if self.done {
       return None;
@@ -201,7 +209,7 @@ impl<T> Future for Receiver<T> {
     }
     if this.inner.sender_dropped.get() {
       this.done = true;
-      return Poll::Ready(Err(Canceled));
+      return Poll::Ready(Err(Canceled(())));
     }
     this.inner.register_recv_waker(cx.waker());
     // RECHECK: register_recv_waker's clone/drop callbacks may have delivered the value
@@ -218,7 +226,7 @@ impl<T> Future for Receiver<T> {
     }
     if this.inner.sender_dropped.get() {
       this.done = true;
-      return Poll::Ready(Err(Canceled));
+      return Poll::Ready(Err(Canceled(())));
     }
     Poll::Pending
   }
@@ -257,7 +265,7 @@ impl<T> Iterator for TryIter<'_, T> {
 
 /// Error returned by a [`Receiver`] whose [`Sender`] dropped without sending.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Canceled;
+pub struct Canceled(());
 
 impl fmt::Display for Canceled {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

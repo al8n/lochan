@@ -34,6 +34,7 @@ impl<T> Chan<T> {
     Self::new(Flavor::unbounded())
   }
 
+  #[inline(always)]
   fn new(flavor: Flavor<T>) -> Rc<Self> {
     Rc::new(Self {
       flavor: LocalCell::new(flavor),
@@ -45,18 +46,22 @@ impl<T> Chan<T> {
     })
   }
 
+  #[inline(always)]
   pub(super) fn cap(&self) -> Option<usize> {
     self.flavor.borrow().cap()
   }
 
+  #[inline(always)]
   pub(super) fn len(&self) -> usize {
     self.flavor.borrow().len()
   }
 
+  #[inline(always)]
   pub(super) fn is_empty(&self) -> bool {
     self.flavor.borrow().is_empty()
   }
 
+  #[inline(always)]
   pub(super) fn is_full(&self) -> bool {
     self.flavor.borrow().is_full()
   }
@@ -66,22 +71,26 @@ impl<T> Chan<T> {
     self.receiver_alive.get()
   }
 
+  #[inline(always)]
   pub(super) fn senders(&self) -> usize {
     self.senders.get()
   }
 
+  #[inline(always)]
   pub(super) fn incr_senders(&self) {
     self.senders.set(self.senders.get() + 1);
   }
 
   /// Decrements the sender count, returning the value *before* the decrement so the
   /// caller can detect the last sender leaving.
+  #[inline(always)]
   pub(super) fn decr_senders(&self) -> usize {
     let n = self.senders.get();
     self.senders.set(n - 1);
     n
   }
 
+  #[inline(always)]
   pub(super) fn clear_receiver(&self) {
     self.receiver_alive.set(false);
   }
@@ -101,6 +110,7 @@ impl<T> Chan<T> {
     }
   }
 
+  #[inline(always)]
   pub(super) fn register_recv_waker(&self, waker: &Waker) {
     // Tombstone: once the receiver is gone (or mid-drop), ignore registration — the
     // only caller then is a re-entrant waker drop, which must not repopulate
@@ -111,20 +121,20 @@ impl<T> Chan<T> {
     // Clone OUTSIDE the borrow, and drop any replaced waker only AFTER it is released:
     // a raw-waker clone/drop callback may re-enter the channel.
     let waker = waker.clone();
-    let old = self.recv_waker.borrow_mut().replace(waker);
-    drop(old);
+    let _ = self.recv_waker.borrow_mut().replace(waker);
   }
 
   /// Clears the receiver's registered waker — used when a pending `recv` is canceled,
   /// so its waker is not retained until a later send or channel drop. Drops the old
   /// waker after releasing the borrow.
+  #[inline(always)]
   pub(super) fn clear_recv_waker(&self) {
-    let old = self.recv_waker.borrow_mut().take();
-    drop(old);
+    let _ = self.recv_waker.borrow_mut().take();
   }
 
   /// Registers a parked sender's waker, returning a stable id for later removal.
   /// Clones outside the borrow.
+  #[inline]
   pub(super) fn add_send_waker(&self, waker: &Waker) -> u64 {
     let waker = waker.clone();
     let id = self.next_send_id.get();
@@ -135,15 +145,15 @@ impl<T> Chan<T> {
 
   /// Removes the send-waker registered under `id`, if still present, dropping it only
   /// AFTER the borrow is released (its drop callback may re-enter the channel).
+  #[inline]
   pub(super) fn remove_send_waker(&self, id: u64) {
-    let removed = {
+    let _ = {
       let mut wakers = self.send_wakers.borrow_mut();
       wakers
         .iter()
         .position(|(wid, _)| *wid == id)
         .map(|pos| wakers.swap_remove(pos))
     };
-    drop(removed);
   }
 
   #[inline(always)]

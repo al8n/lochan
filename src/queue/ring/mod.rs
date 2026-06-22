@@ -25,18 +25,22 @@ impl<T> Ring<T> {
     }
   }
 
+  #[inline(always)]
   pub(super) fn cap(&self) -> usize {
     self.slots.len()
   }
 
+  #[inline(always)]
   pub(super) fn len(&self) -> usize {
     self.len
   }
 
+  #[inline(always)]
   pub(super) fn is_empty(&self) -> bool {
     self.len == 0
   }
 
+  #[inline(always)]
   pub(super) fn is_full(&self) -> bool {
     self.len == self.cap()
   }
@@ -72,6 +76,7 @@ impl<T> Ring<T> {
   }
 
   /// Drops every queued item, leaving the ring empty.
+  #[inline(always)]
   pub(super) fn clear(&mut self) {
     while self.pop().is_some() {}
   }
