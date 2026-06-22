@@ -23,6 +23,7 @@ pub struct Sender<T> {
 }
 
 impl<T> Sender<T> {
+  #[inline(always)]
   pub(super) fn new(chan: Rc<Chan<T>>) -> Self {
     Self { chan }
   }
@@ -50,6 +51,7 @@ impl<T> Sender<T> {
   /// panicking sender waker keeps its one recovered item in transit until the next
   /// receive, so the channel can momentarily hold `capacity() + 1` and
   /// [`len`](Self::len) can briefly exceed this — never by more than one.
+  #[inline(always)]
   pub fn capacity(&self) -> Option<usize> {
     self.chan.cap()
   }
@@ -58,21 +60,25 @@ impl<T> Sender<T> {
   ///
   /// Counts a recovered in-transit item left by a receive interrupted by a panicking
   /// sender waker, so for a bounded channel this can briefly be `capacity() + 1`.
+  #[inline(always)]
   pub fn len(&self) -> usize {
     self.chan.len()
   }
 
   /// Returns `true` if the channel has no items left to receive.
+  #[inline(always)]
   pub fn is_empty(&self) -> bool {
     self.chan.is_empty()
   }
 
   /// Returns `true` if the channel is at capacity.
+  #[inline(always)]
   pub fn is_full(&self) -> bool {
     self.chan.is_full()
   }
 
   /// Returns `true` once every receiver has been dropped.
+  #[inline(always)]
   pub fn is_closed(&self) -> bool {
     !self.chan.receiver_alive()
   }
@@ -85,12 +91,14 @@ impl<T> Sender<T> {
     Send::new(self, item)
   }
 
+  #[inline(always)]
   pub(super) fn chan(&self) -> &Chan<T> {
     &self.chan
   }
 }
 
 impl<T> Clone for Sender<T> {
+  #[inline]
   fn clone(&self) -> Self {
     self.chan.incr_senders();
     Self {
@@ -100,6 +108,7 @@ impl<T> Clone for Sender<T> {
 }
 
 impl<T> Drop for Sender<T> {
+  #[inline]
   fn drop(&mut self) {
     if self.chan.decr_senders() == 1 {
       // Last sender gone: wake every parked receiver so each observes disconnect.
@@ -119,6 +128,7 @@ pub struct Receiver<T> {
 }
 
 impl<T> Receiver<T> {
+  #[inline(always)]
   pub(super) fn new(chan: Rc<Chan<T>>) -> Self {
     Self {
       chan,
@@ -207,6 +217,7 @@ impl<T> Receiver<T> {
     Poll::Pending
   }
 
+  #[inline(always)]
   pub(super) fn chan(&self) -> &Chan<T> {
     &self.chan
   }
@@ -215,17 +226,20 @@ impl<T> Receiver<T> {
   ///
   /// Counts a recovered in-transit item left by a receive interrupted by a panicking
   /// sender waker, so for a bounded channel this can briefly be `capacity() + 1`.
+  #[inline(always)]
   pub fn len(&self) -> usize {
     self.chan.len()
   }
 
   /// Returns `true` if the channel has no items left to receive.
+  #[inline(always)]
   pub fn is_empty(&self) -> bool {
     self.chan.is_empty()
   }
 }
 
 impl<T> Clone for Receiver<T> {
+  #[inline]
   fn clone(&self) -> Self {
     self.chan.incr_receivers();
     Self {

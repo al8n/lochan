@@ -19,14 +19,17 @@ mod checked {
   pub(crate) struct LocalCell<T>(RefCell<T>);
 
   impl<T> LocalCell<T> {
+    #[inline(always)]
     pub(crate) const fn new(value: T) -> Self {
       Self(RefCell::new(value))
     }
 
+    #[inline(always)]
     pub(crate) fn borrow(&self) -> Ref<'_, T> {
       self.0.borrow()
     }
 
+    #[inline(always)]
     pub(crate) fn borrow_mut(&self) -> RefMut<'_, T> {
       self.0.borrow_mut()
     }
@@ -43,6 +46,7 @@ mod unchecked {
   pub(crate) struct LocalCell<T>(UnsafeCell<T>);
 
   impl<T> LocalCell<T> {
+    #[inline(always)]
     pub(crate) const fn new(value: T) -> Self {
       Self(UnsafeCell::new(value))
     }
@@ -69,6 +73,8 @@ mod unchecked {
 
   impl<T> Deref for LocalRef<'_, T> {
     type Target = T;
+
+    #[inline(always)]
     fn deref(&self) -> &T {
       self.0
     }
@@ -76,12 +82,15 @@ mod unchecked {
 
   impl<T> Deref for LocalRefMut<'_, T> {
     type Target = T;
+
+    #[inline(always)]
     fn deref(&self) -> &T {
       self.0
     }
   }
 
   impl<T> DerefMut for LocalRefMut<'_, T> {
+    #[inline(always)]
     fn deref_mut(&mut self) -> &mut T {
       self.0
     }

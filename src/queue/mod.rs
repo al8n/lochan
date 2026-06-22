@@ -29,6 +29,7 @@ impl<T> Flavor<T> {
     Self::Unbounded(BlockList::new())
   }
 
+  #[inline(always)]
   pub(crate) fn len(&self) -> usize {
     match self {
       Self::Bounded(r) => r.len(),
@@ -36,6 +37,7 @@ impl<T> Flavor<T> {
     }
   }
 
+  #[inline(always)]
   pub(crate) fn is_empty(&self) -> bool {
     match self {
       Self::Bounded(r) => r.is_empty(),
@@ -44,6 +46,7 @@ impl<T> Flavor<T> {
   }
 
   /// The capacity, or `None` when unbounded.
+  #[inline(always)]
   pub(crate) fn cap(&self) -> Option<usize> {
     match self {
       Self::Bounded(r) => Some(r.cap()),
@@ -51,6 +54,7 @@ impl<T> Flavor<T> {
     }
   }
 
+  #[inline(always)]
   pub(crate) fn is_full(&self) -> bool {
     match self {
       Self::Bounded(r) => r.is_full(),

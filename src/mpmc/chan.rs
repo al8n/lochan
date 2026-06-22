@@ -36,14 +36,17 @@ pub(super) struct Chan<T> {
 }
 
 impl<T> Chan<T> {
+  #[inline(always)]
   pub(super) fn bounded(cap: usize) -> Rc<Self> {
     Self::new(Flavor::bounded(cap))
   }
 
+  #[inline(always)]
   pub(super) fn unbounded() -> Rc<Self> {
     Self::new(Flavor::unbounded())
   }
 
+  #[inline(always)]
   fn new(flavor: Flavor<T>) -> Rc<Self> {
     Rc::new(Self {
       flavor: LocalCell::new(flavor),
@@ -57,16 +60,19 @@ impl<T> Chan<T> {
     })
   }
 
+  #[inline(always)]
   pub(super) fn cap(&self) -> Option<usize> {
     self.flavor.borrow().cap()
   }
 
+  #[inline(always)]
   pub(super) fn len(&self) -> usize {
     // Count the in-transit redelivery item too: it is logically queued (delivered next),
     // just parked outside `flavor` across a sender wake.
     self.flavor.borrow().len() + usize::from(self.redelivery.borrow().is_some())
   }
 
+  #[inline(always)]
   pub(super) fn is_empty(&self) -> bool {
     // A parked redelivery item is still pending delivery, so the channel is NOT empty.
     // Public `is_empty` and `FusedStream::is_terminated` both route through here, so this
@@ -74,6 +80,7 @@ impl<T> Chan<T> {
     self.redelivery.borrow().is_none() && self.flavor.borrow().is_empty()
   }
 
+  #[inline(always)]
   pub(super) fn is_full(&self) -> bool {
     // The redelivery item was popped out of `flavor`, so it does not occupy queue
     // capacity; a sender's push view is the backing queue alone.
@@ -86,28 +93,33 @@ impl<T> Chan<T> {
     self.receivers.get() > 0
   }
 
+  #[inline(always)]
   pub(super) fn senders(&self) -> usize {
     self.senders.get()
   }
 
+  #[inline(always)]
   pub(super) fn incr_senders(&self) {
     self.senders.set(self.senders.get() + 1);
   }
 
   /// Decrements the sender count, returning the value *before* the decrement so the
   /// caller can detect the last sender leaving.
+  #[inline(always)]
   pub(super) fn decr_senders(&self) -> usize {
     let n = self.senders.get();
     self.senders.set(n - 1);
     n
   }
 
+  #[inline(always)]
   pub(super) fn incr_receivers(&self) {
     self.receivers.set(self.receivers.get() + 1);
   }
 
   /// Decrements the receiver count, returning the value *before* the decrement so the
   /// caller can detect the last receiver leaving.
+  #[inline(always)]
   pub(super) fn decr_receivers(&self) -> usize {
     let n = self.receivers.get();
     self.receivers.set(n - 1);
@@ -116,6 +128,7 @@ impl<T> Chan<T> {
 
   /// Registers a parked receiver's waker, returning a stable id for later removal.
   /// Clones outside the borrow.
+  #[inline]
   pub(super) fn add_recv_waker(&self, waker: &Waker) -> u64 {
     let waker = waker.clone();
     let id = self.next_recv_id.get();
@@ -126,15 +139,15 @@ impl<T> Chan<T> {
 
   /// Removes the recv-waker registered under `id`, if still present, dropping it only
   /// AFTER the borrow is released (its drop callback may re-enter the channel).
+  #[inline]
   pub(super) fn remove_recv_waker(&self, id: u64) {
-    let removed = {
+    let _ = {
       let mut wakers = self.recv_wakers.borrow_mut();
       wakers
         .iter()
         .position(|(wid, _)| *wid == id)
         .map(|pos| wakers.swap_remove(pos))
     };
-    drop(removed);
   }
 
   /// Wakes every parked receiver. Called when an item is pushed or the last sender
@@ -160,6 +173,7 @@ impl<T> Chan<T> {
 
   /// Registers a parked sender's waker, returning a stable id for later removal.
   /// Clones outside the borrow.
+  #[inline]
   pub(super) fn add_send_waker(&self, waker: &Waker) -> u64 {
     let waker = waker.clone();
     let id = self.next_send_id.get();
@@ -170,15 +184,15 @@ impl<T> Chan<T> {
 
   /// Removes the send-waker registered under `id`, if still present, dropping it only
   /// AFTER the borrow is released (its drop callback may re-enter the channel).
+  #[inline]
   pub(super) fn remove_send_waker(&self, id: u64) {
-    let removed = {
+    let _ = {
       let mut wakers = self.send_wakers.borrow_mut();
       wakers
         .iter()
         .position(|(wid, _)| *wid == id)
         .map(|pos| wakers.swap_remove(pos))
     };
-    drop(removed);
   }
 
   /// The number of registered send-wakers — used by tests to assert a completed send did

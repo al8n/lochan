@@ -22,6 +22,7 @@ pub struct Sender<T> {
 }
 
 impl<T> Sender<T> {
+  #[inline(always)]
   pub(super) fn new(chan: Rc<Chan<T>>) -> Self {
     Self { chan }
   }
@@ -44,26 +45,31 @@ impl<T> Sender<T> {
   }
 
   /// The channel's capacity, or `None` if the channel is unbounded.
+  #[inline(always)]
   pub fn capacity(&self) -> Option<usize> {
     self.chan.cap()
   }
 
   /// The number of currently-queued items.
+  #[inline(always)]
   pub fn len(&self) -> usize {
     self.chan.len()
   }
 
   /// Returns `true` if no items are queued.
+  #[inline(always)]
   pub fn is_empty(&self) -> bool {
     self.chan.is_empty()
   }
 
   /// Returns `true` if the channel is at capacity.
+  #[inline(always)]
   pub fn is_full(&self) -> bool {
     self.chan.is_full()
   }
 
   /// Returns `true` once the receiver has been dropped.
+  #[inline(always)]
   pub fn is_closed(&self) -> bool {
     !self.chan.receiver_alive()
   }
@@ -76,12 +82,14 @@ impl<T> Sender<T> {
     Send::new(self, item)
   }
 
+  #[inline(always)]
   pub(super) fn chan(&self) -> &Chan<T> {
     &self.chan
   }
 }
 
 impl<T> Clone for Sender<T> {
+  #[inline]
   fn clone(&self) -> Self {
     self.chan.incr_senders();
     Self {
@@ -91,6 +99,7 @@ impl<T> Clone for Sender<T> {
 }
 
 impl<T> Drop for Sender<T> {
+  #[inline]
   fn drop(&mut self) {
     if self.chan.decr_senders() == 1 {
       // Last sender gone: wake a parked receiver so it observes disconnect.
@@ -105,6 +114,7 @@ pub struct Receiver<T> {
 }
 
 impl<T> Receiver<T> {
+  #[inline(always)]
   pub(super) fn new(chan: Rc<Chan<T>>) -> Self {
     Self { chan }
   }
@@ -170,16 +180,19 @@ impl<T> Receiver<T> {
     Poll::Pending
   }
 
+  #[inline(always)]
   pub(super) fn chan(&self) -> &Chan<T> {
     &self.chan
   }
 
   /// The number of currently-queued items.
+  #[inline(always)]
   pub fn len(&self) -> usize {
     self.chan.len()
   }
 
   /// Returns `true` if no items are queued.
+  #[inline(always)]
   pub fn is_empty(&self) -> bool {
     self.chan.is_empty()
   }

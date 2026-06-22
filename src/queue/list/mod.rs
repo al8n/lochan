@@ -77,10 +77,12 @@ impl<T, const N: usize> BlockList<T, N> {
     }
   }
 
+  #[inline(always)]
   pub(super) fn len(&self) -> usize {
     self.len
   }
 
+  #[inline(always)]
   pub(super) fn is_empty(&self) -> bool {
     self.len == 0
   }
