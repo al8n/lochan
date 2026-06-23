@@ -33,7 +33,7 @@ impl<T> Sender<T> {
   /// way the item is carried back.
   #[inline(always)]
   pub fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
-    if !self.chan.receiver_alive() {
+    if !self.chan.receiver_alive() || self.chan.is_closed() {
       return Err(TrySendError::Closed(item));
     }
     match self.chan.try_push(item) {
@@ -77,10 +77,24 @@ impl<T> Sender<T> {
     self.chan.is_full()
   }
 
-  /// Returns `true` once every receiver has been dropped.
+  /// Returns `true` once every receiver has been dropped or the channel has been
+  /// [`close`](Self::close)d.
   #[inline(always)]
   pub fn is_closed(&self) -> bool {
-    !self.chan.receiver_alive()
+    !self.chan.receiver_alive() || self.chan.is_closed()
+  }
+
+  /// Closes the channel. Every subsequent send fails closed, and receivers observe
+  /// disconnect once they have drained what is already queued. Returns `true` if this
+  /// call closed a still-open channel — `false` if it was already closed, whether by a
+  /// prior `close` or by every receiver dropping. Callable through any clone.
+  #[inline(always)]
+  pub fn close(&self) -> bool {
+    if self.is_closed() {
+      return false;
+    }
+    self.chan.close();
+    true
   }
 
   /// Returns a future that sends `item`, awaiting capacity when a bounded channel is
@@ -143,7 +157,7 @@ impl<T> Receiver<T> {
   pub fn try_recv(&self) -> Result<T, TryRecvError> {
     match self.chan.try_take() {
       Some(item) => Ok(item),
-      None if self.chan.senders() == 0 => Err(TryRecvError::Disconnected),
+      None if self.chan.senders() == 0 || self.chan.is_closed() => Err(TryRecvError::Disconnected),
       None => Err(TryRecvError::Empty),
     }
   }
@@ -188,8 +202,8 @@ impl<T> Receiver<T> {
       // slot, so a panicking sender waker re-queues it rather than dropping a stack local.
       return Poll::Ready(Some(item));
     }
-    if chan.senders() == 0 {
-      // Empty and every sender is gone — the channel is disconnected.
+    if chan.senders() == 0 || chan.is_closed() {
+      // Empty and either every sender is gone or the channel was closed — disconnected.
       return Poll::Ready(None);
     }
     let id = chan.add_recv_waker(cx.waker());
@@ -208,7 +222,7 @@ impl<T> Receiver<T> {
     if let Some(item) = chan.try_take() {
       return Poll::Ready(Some(item));
     }
-    if chan.senders() == 0 {
+    if chan.senders() == 0 || chan.is_closed() {
       if let Some(id) = waker_id.take() {
         chan.remove_recv_waker(id);
       }
@@ -235,6 +249,26 @@ impl<T> Receiver<T> {
   #[inline(always)]
   pub fn is_empty(&self) -> bool {
     self.chan.is_empty()
+  }
+
+  /// Returns `true` once every sender has been dropped or the channel has been
+  /// [`close`](Self::close)d. Items may still be queued for draining.
+  #[inline(always)]
+  pub fn is_closed(&self) -> bool {
+    self.chan.senders() == 0 || self.chan.is_closed()
+  }
+
+  /// Closes the channel. Every subsequent send fails closed; receivers can still drain
+  /// what is already queued, after which they observe disconnect. Returns `true` if this
+  /// call closed a still-open channel — `false` if it was already closed, whether by a
+  /// prior `close` or by every sender dropping. Callable through any clone.
+  #[inline(always)]
+  pub fn close(&self) -> bool {
+    if self.is_closed() {
+      return false;
+    }
+    self.chan.close();
+    true
   }
 }
 
@@ -339,7 +373,9 @@ impl<T> FusedStream for Receiver<T> {
   /// that waker. One more poll clears it at the poll-top stale-remove and returns `None`.
   #[inline]
   fn is_terminated(&self) -> bool {
-    self.stream_waker_id.get().is_none() && self.chan.senders() == 0 && self.chan.is_empty()
+    self.stream_waker_id.get().is_none()
+      && (self.chan.senders() == 0 || self.chan.is_closed())
+      && self.chan.is_empty()
   }
 }
 

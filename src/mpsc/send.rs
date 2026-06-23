@@ -79,7 +79,7 @@ impl<T> Future for Send<'_, T> {
       return Poll::Pending;
     }
     let chan = this.sender.chan();
-    if !chan.receiver_alive() {
+    if !chan.receiver_alive() || chan.is_closed() {
       let item = this.item.take().expect("message present");
       return this.commit(Err(SendError::new(item)), chan);
     }
@@ -100,7 +100,7 @@ impl<T> Future for Send<'_, T> {
         // RECHECK closure + capacity — the (re-)registration callbacks may have freed
         // a slot or closed the receiver. Closure first, so we never enqueue into a
         // closed channel.
-        if !chan.receiver_alive() {
+        if !chan.receiver_alive() || chan.is_closed() {
           let item = this.item.take().expect("message present");
           return this.commit(Err(SendError::new(item)), chan);
         }

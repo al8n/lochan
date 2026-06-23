@@ -259,3 +259,20 @@ fn try_iter_preserves_cancellation_for_a_later_poll() {
   let (w, _cw) = counting_waker();
   assert_eq!(poll_once(&mut rx, &w), Poll::Ready(Err(Canceled(()))));
 }
+
+#[test]
+fn receiver_is_closed_after_sender_drop() {
+  let (tx, rx) = channel::<u32>();
+  assert!(!rx.is_closed());
+  drop(tx); // the sender cancels without sending
+  assert!(rx.is_closed());
+}
+
+#[test]
+fn receiver_is_closed_after_send() {
+  let (tx, rx) = channel::<u32>();
+  tx.send(7).unwrap(); // `send` consumes (drops) the sender
+                       // The sending side is gone, so the receiver is closed — the delivered value is still
+                       // waiting in the slot to be taken.
+  assert!(rx.is_closed());
+}
