@@ -119,11 +119,11 @@ impl<T> Chan<T> {
       let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.wake_receiver()));
       let s = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.wake_senders()));
       match (r, s) {
-        // Both phases panicked: resume the first and FORGET the second. Dropping a panic
-        // payload whose own `Drop` panics (an adversarial `panic_any` value) would
-        // double-panic into an abort while this call is already unwinding.
+        // Both phases panicked: resume the first and dispose of the second without dropping
+        // it directly — a payload whose own `Drop` panics (an adversarial `panic_any` value)
+        // would otherwise double-panic into an abort while this call is already unwinding.
         (Err(first), Err(second)) => {
-          core::mem::forget(second);
+          crate::drop_panic_payload(second);
           std::panic::resume_unwind(first);
         }
         (Err(panic), Ok(())) | (Ok(()), Err(panic)) => std::panic::resume_unwind(panic),
@@ -260,9 +260,9 @@ impl<T> Chan<T> {
           if first_panic.is_none() {
             first_panic = Some(panic);
           } else {
-            // Only the first panic is resumed; forget the rest. Dropping a `panic_any`
-            // payload whose `Drop` panics would abort while unwinding.
-            core::mem::forget(panic);
+            // Only the first panic is resumed; dispose of the rest. A `panic_any` payload
+            // whose `Drop` panics would otherwise abort while unwinding.
+            crate::drop_panic_payload(panic);
           }
         }
       }
