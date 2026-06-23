@@ -1947,14 +1947,14 @@ fn close_isolates_two_panicking_send_wakers() {
 }
 
 #[test]
-fn close_forgets_toxic_panic_payloads_instead_of_aborting() {
+fn close_does_not_abort_on_a_toxic_panic_payload() {
   use super::chan::Chan;
   use core::task::{RawWaker, RawWakerVTable, Waker};
   use std::panic::{catch_unwind, AssertUnwindSafe};
 
-  // A panic payload whose own Drop panics. Wakers raise it via panic_any, so close() catches
-  // payloads it must NOT drop — dropping one would double-panic into an abort. close() (and
-  // wake_all) resume one and forget the rest; this test likewise forgets the resumed one.
+  // A panic payload whose own Drop panics, raised via panic_any. close() resumes one panic
+  // and disposes of the rest with drop_panic_payload (drop inside catch_unwind — freed, no
+  // abort); this test does the same with the resumed payload.
   struct PanicOnDrop;
   impl Drop for PanicOnDrop {
     fn drop(&mut self) {
@@ -1979,7 +1979,7 @@ fn close_forgets_toxic_panic_payloads_instead_of_aborting() {
   chan.add_send_waker(&toxic); // a toxic sender
   chan.add_send_waker(&toxic); // a second toxic sender (exercises wake_all's secondary forget)
   if let Err(payload) = catch_unwind(AssertUnwindSafe(|| chan.close())) {
-    core::mem::forget(payload);
+    crate::drop_panic_payload(payload);
   }
   assert_eq!(cw.0.load(Ordering::SeqCst), 1);
 }
