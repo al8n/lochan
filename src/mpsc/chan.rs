@@ -185,7 +185,11 @@ impl<T> Chan<T> {
     if !self.receiver_alive.get() || self.senders.get() == 0 || self.closed.get() {
       return;
     }
-    let _ = self.recv_waker.borrow_mut().replace(waker);
+    // Bind the replaced waker so it drops at function exit, AFTER the borrow_mut temporary
+    // is released. A bare `let _ = ...replace(...)` drops it while the borrow is still held
+    // (reverse drop order), and a re-entrant waker drop callback then double-borrows.
+    let replaced = self.recv_waker.borrow_mut().replace(waker);
+    drop(replaced);
   }
 
   /// Clears the receiver's registered waker — used when a pending `recv` is canceled or

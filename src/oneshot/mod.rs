@@ -43,7 +43,11 @@ impl<T> Inner<T> {
     // Clone OUTSIDE the borrow, and drop any replaced waker only AFTER it is released:
     // a raw-waker clone/drop callback may re-enter the channel.
     let waker = waker.clone();
-    let _ = self.recv_waker.borrow_mut().replace(waker);
+    // Bind the replaced waker so it drops at function exit, AFTER the borrow_mut temporary
+    // is released. A bare `let _ = ...replace(...)` drops it while the borrow is still held
+    // (reverse drop order), and a re-entrant waker drop callback then double-borrows.
+    let replaced = self.recv_waker.borrow_mut().replace(waker);
+    drop(replaced);
   }
 
   #[inline(always)]
@@ -60,7 +64,10 @@ impl<T> Inner<T> {
   /// so its waker is not retained. Drops the old waker after releasing the borrow.
   #[inline(always)]
   fn clear_recv_waker(&self) {
-    let _ = self.recv_waker.borrow_mut().take();
+    // Drop the taken waker AFTER the borrow_mut temporary is released (a bare `let _ =`
+    // drops it inside the borrow); a re-entrant waker drop must not double-borrow.
+    let taken = self.recv_waker.borrow_mut().take();
+    drop(taken);
   }
 
   /// Drops the slot value if present, clearing the flag *before* the drop so a

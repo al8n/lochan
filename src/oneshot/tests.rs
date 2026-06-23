@@ -218,7 +218,7 @@ fn canceled_display_and_debug() {
     format!("{}", Canceled(())),
     "oneshot sender dropped without sending a value"
   );
-  assert_eq!(format!("{:?}", Canceled(())), "Canceled");
+  assert_eq!(format!("{:?}", Canceled(())), "Canceled(())");
 }
 
 #[test]
