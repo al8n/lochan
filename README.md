@@ -85,17 +85,17 @@ consumer).
 
 | benchmark (1024 elements) | `lochan` | `local-sync` | `local-channel` |
 | --- | --- | --- | --- |
-| `mpsc` unbounded — buffer + drain | 6.3 µs · 163 Melem/s | 5.9 µs · 172 Melem/s | 6.0 µs · 172 Melem/s |
-| `mpmc` unbounded — buffer + drain | 7.8 µs · 131 Melem/s | 5.9 µs · 172 Melem/s | 6.0 µs · 172 Melem/s |
-| `mpsc` bounded — buffer + drain | 5.7 µs · 181 Melem/s | 13.1 µs · 78 Melem/s | — |
-| `mpmc` bounded — buffer + drain | 7.4 µs · 138 Melem/s | 13.1 µs · 78 Melem/s | — |
-| `oneshot` — create + send + recv | 18.2 ns | 19.6 ns | — |
+| `mpsc` unbounded — buffer + drain | 6.4 µs · 161 Melem/s | 5.9 µs · 174 Melem/s | 6.4 µs · 160 Melem/s |
+| `mpmc` unbounded — buffer + drain | 7.6 µs · 134 Melem/s | 5.9 µs · 174 Melem/s | 6.4 µs · 160 Melem/s |
+| `mpsc` bounded — buffer + drain | 5.8 µs · 175 Melem/s | 12.6 µs · 81 Melem/s | — |
+| `mpmc` bounded — buffer + drain | 7.5 µs · 136 Melem/s | 12.6 µs · 81 Melem/s | — |
+| `oneshot` — create + send + recv | 18.8 ns | 20.6 ns | — |
 
 Indicative only — laptop run-to-run variance is ±10–15%, so compare *within* one
 `cargo bench` run rather than against the absolute figures. On that basis,
 `lochan`'s `mpsc` is on par with `local-sync` on the unbounded channel and on
 `oneshot`, and ~2× faster on the bounded channel (its fixed `MaybeUninit` ring
-beats `local-sync`'s semaphore-gated bounded queue). `mpmc` adds ~25–30% over
+beats `local-sync`'s semaphore-gated bounded queue). `mpmc` adds ~20–30% over
 `mpsc` for its multi-consumer machinery — the receiver-waker list and the
 panic-safe redelivery slot — yet still runs ~1.7× faster than `local-sync` on
 the bounded path.
