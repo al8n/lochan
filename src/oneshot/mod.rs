@@ -189,6 +189,14 @@ impl<T> Receiver<T> {
   pub fn try_iter(&mut self) -> TryIter<'_, T> {
     TryIter(self)
   }
+
+  /// Returns `true` once the sender has dropped — whether it sent the value first or
+  /// canceled. A delivered value may still be waiting in the slot for [`try_recv`](Self::try_recv)
+  /// or a poll to take.
+  #[inline(always)]
+  pub fn is_closed(&self) -> bool {
+    self.inner.sender_dropped.get()
+  }
 }
 
 impl<T> Future for Receiver<T> {

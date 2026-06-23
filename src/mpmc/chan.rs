@@ -21,6 +21,10 @@ pub(super) struct Chan<T> {
   /// Live receiver count. Once it hits zero sends fail closed and the last receiver
   /// drains the queue.
   receivers: Cell<usize>,
+  /// Set by an explicit [`close`](Self::close) from either handle. Independent of the
+  /// refcounts: sends then fail closed and receivers drain then disconnect, even while
+  /// both halves are still alive.
+  closed: Cell<bool>,
   /// Wakers of receivers parked on an empty channel, each tagged with a stable
   /// registration id so a future can remove exactly its own entry. A push wakes every
   /// parked receiver; whichever polls first pops the item, the rest re-park.
@@ -53,6 +57,7 @@ impl<T> Chan<T> {
       redelivery: LocalCell::new(None),
       senders: Cell::new(1),
       receivers: Cell::new(1),
+      closed: Cell::new(false),
       recv_wakers: LocalCell::new(Vec::new()),
       next_recv_id: Cell::new(0),
       send_wakers: LocalCell::new(Vec::new()),
@@ -126,13 +131,77 @@ impl<T> Chan<T> {
     n
   }
 
+  /// Marks the channel explicitly closed, then wakes both halves so parked receivers
+  /// observe disconnect and parked sends fail closed. Idempotent: a repeat is a no-op
+  /// that skips the redundant wakes.
+  #[inline(always)]
+  pub(super) fn close(&self) {
+    if self.closed.replace(true) {
+      return;
+    }
+    // Wake BOTH halves, isolating wake panics. Once `closed` is set a retry skips the
+    // wakes, so a panicking receiver waker must neither leave parked senders unwoken nor
+    // turn a second panicking sender waker into a double-panic abort. Under `std`, catch
+    // each phase, wake both, then resume only the first panic. Under `no_std` (no
+    // `catch_unwind`) a guard wakes the senders on an unwind from the receiver wake: a
+    // single panicking waker is recovered; two abort — the limit `wake_all` documents.
+    #[cfg(feature = "std")]
+    {
+      let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.wake_receivers()));
+      let s = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.wake_senders()));
+      match (r, s) {
+        // Both phases panicked: resume the first and FORGET the second. Dropping a panic
+        // payload whose own `Drop` panics (an adversarial `panic_any` value) would
+        // double-panic into an abort while this call is already unwinding.
+        (Err(first), Err(second)) => {
+          core::mem::forget(second);
+          std::panic::resume_unwind(first);
+        }
+        (Err(panic), Ok(())) | (Ok(()), Err(panic)) => std::panic::resume_unwind(panic),
+        (Ok(()), Ok(())) => {}
+      }
+    }
+    #[cfg(not(feature = "std"))]
+    {
+      struct WakeSendersOnUnwind<'a, T>(&'a Chan<T>);
+      impl<T> Drop for WakeSendersOnUnwind<'_, T> {
+        fn drop(&mut self) {
+          self.0.wake_senders();
+        }
+      }
+      let guard = WakeSendersOnUnwind(self);
+      self.wake_receivers();
+      core::mem::forget(guard);
+      self.wake_senders();
+    }
+  }
+
+  /// Whether [`close`](Self::close) has been called.
+  #[inline(always)]
+  pub(super) fn is_closed(&self) -> bool {
+    self.closed.get()
+  }
+
   /// Registers a parked receiver's waker, returning a stable id for later removal.
   /// Clones outside the borrow.
   #[inline]
   pub(super) fn add_recv_waker(&self, waker: &Waker) -> u64 {
-    let waker = waker.clone();
     let id = self.next_recv_id.get();
     self.next_recv_id.set(id.wrapping_add(1));
+    // Skip storing once the channel is terminal — every sender gone, the channel closed,
+    // or every receiver gone. The only caller then is a re-entrant waker callback during
+    // disconnect cleanup; storing would orphan the waker (a terminal recv/stream never
+    // removes it). The id is still consumed, so a caller's later remove is a clean no-op.
+    if self.senders.get() == 0 || self.closed.get() || self.receivers.get() == 0 {
+      return id;
+    }
+    let waker = waker.clone();
+    // The clone callback may have just made the channel terminal (pushed the final item and
+    // closed, or dropped the last sender). Re-check before storing so poll_recv's recheck can
+    // deliver that item via `Ready(Some)` without leaving an orphaned waker behind.
+    if self.senders.get() == 0 || self.closed.get() || self.receivers.get() == 0 {
+      return id;
+    }
     self.recv_wakers.borrow_mut().push((id, waker));
     id
   }
@@ -327,6 +396,10 @@ fn wake_all(wakers: Vec<(u64, Waker)>) {
       {
         if first_panic.is_none() {
           first_panic = Some(panic);
+        } else {
+          // Only the first panic is resumed; forget the rest. Dropping a `panic_any`
+          // payload whose `Drop` panics would abort while unwinding.
+          core::mem::forget(panic);
         }
       }
     }

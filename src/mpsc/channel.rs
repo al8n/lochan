@@ -32,7 +32,7 @@ impl<T> Sender<T> {
   /// way the item is carried back.
   #[inline(always)]
   pub fn try_send(&self, item: T) -> Result<(), TrySendError<T>> {
-    if !self.chan.receiver_alive() {
+    if !self.chan.receiver_alive() || self.chan.is_closed() {
       return Err(TrySendError::Closed(item));
     }
     match self.chan.try_push(item) {
@@ -68,10 +68,24 @@ impl<T> Sender<T> {
     self.chan.is_full()
   }
 
-  /// Returns `true` once the receiver has been dropped.
+  /// Returns `true` once the receiver has been dropped or the channel has been
+  /// [`close`](Self::close)d.
   #[inline(always)]
   pub fn is_closed(&self) -> bool {
-    !self.chan.receiver_alive()
+    !self.chan.receiver_alive() || self.chan.is_closed()
+  }
+
+  /// Closes the channel. Every subsequent send fails closed, and the receiver observes
+  /// disconnect once it has drained what is already queued. Returns `true` if this call
+  /// closed a still-open channel — `false` if it was already closed, whether by a prior
+  /// `close` or by the receiver dropping. Callable through any clone.
+  #[inline(always)]
+  pub fn close(&self) -> bool {
+    if self.is_closed() {
+      return false;
+    }
+    self.chan.close();
+    true
   }
 
   /// Returns a future that sends `item`, awaiting capacity when a bounded channel is
@@ -129,7 +143,7 @@ impl<T> Receiver<T> {
         self.chan.wake_senders();
         Ok(item)
       }
-      None if self.chan.senders() == 0 => Err(TryRecvError::Disconnected),
+      None if self.chan.senders() == 0 || self.chan.is_closed() => Err(TryRecvError::Disconnected),
       None => Err(TryRecvError::Empty),
     }
   }
@@ -159,8 +173,10 @@ impl<T> Receiver<T> {
       chan.wake_senders();
       return Poll::Ready(Some(item));
     }
-    if chan.senders() == 0 {
-      // Empty and every sender is gone — the channel is disconnected.
+    if chan.senders() == 0 || chan.is_closed() {
+      // Empty and disconnected (every sender gone, or the channel closed). Clear any waker
+      // a prior spurious poll left registered so a terminal recv/stream does not retain it.
+      chan.clear_recv_waker();
       return Poll::Ready(None);
     }
     chan.register_recv_waker(cx.waker());
@@ -174,7 +190,12 @@ impl<T> Receiver<T> {
       chan.wake_senders();
       return Poll::Ready(Some(item));
     }
-    if chan.senders() == 0 {
+    if chan.senders() == 0 || chan.is_closed() {
+      // Disconnected during/after registration — a re-entrant waker clone may have closed
+      // the channel or dropped the last sender. No item is in flight here, so clearing the
+      // just-registered waker cannot lose one; leaving it would strand the waker on a
+      // terminal recv/stream until the receiver drops (mpmc clears its mirror slot here).
+      chan.clear_recv_waker();
       return Poll::Ready(None);
     }
     Poll::Pending
@@ -195,6 +216,26 @@ impl<T> Receiver<T> {
   #[inline(always)]
   pub fn is_empty(&self) -> bool {
     self.chan.is_empty()
+  }
+
+  /// Returns `true` once every sender has been dropped or the channel has been
+  /// [`close`](Self::close)d. Items may still be queued for draining.
+  #[inline(always)]
+  pub fn is_closed(&self) -> bool {
+    self.chan.senders() == 0 || self.chan.is_closed()
+  }
+
+  /// Closes the channel. Every subsequent send fails closed; this receiver can still
+  /// drain what is already queued, after which it observes disconnect. Returns `true` if
+  /// this call closed a still-open channel — `false` if it was already closed, whether by
+  /// a prior `close` or by every sender dropping.
+  #[inline(always)]
+  pub fn close(&self) -> bool {
+    if self.is_closed() {
+      return false;
+    }
+    self.chan.close();
+    true
   }
 }
 
@@ -237,7 +278,7 @@ impl<T> FusedStream for Receiver<T> {
   /// `poll_next` only returns `None`.
   #[inline]
   fn is_terminated(&self) -> bool {
-    self.chan.senders() == 0 && self.chan.is_empty()
+    (self.chan.senders() == 0 || self.chan.is_closed()) && self.chan.is_empty()
   }
 }
 

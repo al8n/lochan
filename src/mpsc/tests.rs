@@ -906,3 +906,288 @@ fn try_iter_drains_ready_items_without_blocking() {
   tx.try_send(3).unwrap();
   assert_eq!(rx.try_recv(), Ok(3));
 }
+
+#[test]
+fn receiver_is_closed_once_every_sender_drops() {
+  let (tx, rx) = bounded::<u32>(1);
+  assert!(!rx.is_closed());
+  drop(tx);
+  assert!(rx.is_closed());
+}
+
+#[test]
+fn close_from_sender_disconnects_both_ends() {
+  let (tx, rx) = bounded::<u32>(2);
+  assert!(!tx.is_closed());
+  assert!(!rx.is_closed());
+  assert!(tx.close()); // newly closed
+  assert!(tx.is_closed());
+  assert!(rx.is_closed());
+  assert!(matches!(tx.try_send(1), Err(TrySendError::Closed(1))));
+}
+
+#[test]
+fn close_from_receiver_disconnects_both_ends() {
+  let (tx, rx) = bounded::<u32>(2);
+  assert!(rx.close());
+  assert!(rx.is_closed());
+  assert!(tx.is_closed());
+  assert!(matches!(tx.try_send(1), Err(TrySendError::Closed(1))));
+}
+
+#[test]
+fn close_keeps_queued_items_drainable_then_disconnects() {
+  let (tx, mut rx) = bounded::<u32>(4);
+  tx.try_send(1).unwrap();
+  tx.try_send(2).unwrap();
+  tx.close();
+  assert_eq!(rx.try_recv(), Ok(1));
+  assert_eq!(rx.try_recv(), Ok(2));
+  assert_eq!(rx.try_recv(), Err(TryRecvError::Disconnected));
+}
+
+#[test]
+fn close_is_idempotent() {
+  let (tx, _rx) = bounded::<u32>(1);
+  assert!(tx.close()); // first call closes
+  assert!(!tx.close()); // already closed
+}
+
+#[test]
+fn close_through_a_clone_closes_the_channel() {
+  let (tx, rx) = bounded::<u32>(1);
+  let tx2 = tx.clone();
+  assert!(tx2.close());
+  assert!(tx.is_closed());
+  assert!(rx.is_closed());
+}
+
+#[test]
+fn close_wakes_a_parked_recv_to_none() {
+  let (tx, mut rx) = bounded::<u32>(1);
+  let (w, cw) = counting_waker();
+  let mut fut = rx.recv();
+  assert!(poll_once(&mut fut, &w).is_pending()); // empty → parks
+  assert_eq!(cw.0.load(Ordering::SeqCst), 0);
+  tx.close(); // wakes the parked recv
+  assert_eq!(cw.0.load(Ordering::SeqCst), 1);
+  assert_eq!(poll_once(&mut fut, &w), Poll::Ready(None));
+}
+
+#[test]
+fn close_during_recv_registration_clears_the_waker() {
+  use super::chan::Chan;
+  use core::task::{RawWaker, RawWakerVTable, Waker};
+
+  // A raw waker whose CLONE closes the channel, so the re-entrant close lands during
+  // poll_recv's waker registration. The post-registration disconnect branch must clear
+  // the just-stored waker rather than strand it on the now-closed receiver.
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    let chan = unsafe { &*(p as *const Chan<u32>) };
+    chan.close();
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_noop, vt_noop, vt_noop);
+
+  let chan = Chan::<u32>::bounded(1);
+  let reentrant = unsafe { Waker::from_raw(RawWaker::new(Rc::as_ptr(&chan) as *const (), &VT)) };
+  let mut rx = Receiver::new(chan.clone());
+  let mut fut = rx.recv();
+  // Empty, so it registers; the clone closes the channel; the recheck sees closed → None.
+  assert_eq!(poll_once(&mut fut, &reentrant), Poll::Ready(None));
+  // The just-registered waker must not be retained on the closed receiver.
+  assert!(!chan.recv_waker_registered());
+}
+
+#[test]
+fn close_after_receiver_drop_returns_false() {
+  let (tx, rx) = bounded::<u32>(1);
+  drop(rx);
+  assert!(tx.is_closed());
+  assert!(!tx.close()); // already closed by the receiver dropping
+}
+
+#[test]
+fn close_after_senders_drop_returns_false() {
+  let (tx, rx) = bounded::<u32>(1);
+  drop(tx);
+  assert!(rx.is_closed());
+  assert!(!rx.close()); // already closed by every sender dropping
+}
+
+#[test]
+fn close_wakes_parked_senders_even_if_a_recv_waker_panics() {
+  use super::chan::Chan;
+  use core::task::{RawWaker, RawWakerVTable, Waker};
+  use std::panic::{catch_unwind, AssertUnwindSafe};
+
+  // A recv waker that panics on wake. close() wakes the receiver first; the panic must not
+  // skip the sender wake — once closed is set a retry is a no-op, so a parked sender would
+  // otherwise stay Pending on a closed channel forever.
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_wake(_: *const ()) {
+    panic!("recv waker panics on wake");
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_wake, vt_wake, vt_noop);
+
+  let chan = Chan::<u32>::bounded(1);
+  chan.try_push(0).unwrap(); // full, so a sender parks
+  let panicking_recv = unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VT)) };
+  chan.register_recv_waker(&panicking_recv);
+  let cw = Arc::new(CountingWaker(AtomicUsize::new(0)));
+  chan.add_send_waker(&waker(cw.clone()));
+  let _ = catch_unwind(AssertUnwindSafe(|| chan.close()));
+  assert_eq!(cw.0.load(Ordering::SeqCst), 1); // the parked sender was woken despite the panic
+}
+
+#[test]
+fn close_isolates_panics_from_both_a_recv_and_a_send_waker() {
+  use super::chan::Chan;
+  use core::task::{RawWaker, RawWakerVTable, Waker};
+  use std::panic::{catch_unwind, AssertUnwindSafe};
+
+  // Both a recv waker and a send waker panic on wake. close() must wake both sides and
+  // isolate the panics (resume one) rather than double-panic into a process abort.
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_wake(_: *const ()) {
+    panic!("waker panics on wake");
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_wake, vt_wake, vt_noop);
+
+  let chan = Chan::<u32>::bounded(1);
+  chan.try_push(0).unwrap(); // full, so senders park
+  let panicking = unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VT)) };
+  chan.register_recv_waker(&panicking); // a recv waker that panics on wake
+  let cw = Arc::new(CountingWaker(AtomicUsize::new(0)));
+  chan.add_send_waker(&waker(cw.clone())); // a normal send waker
+  chan.add_send_waker(&panicking); // a send waker that panics on wake (woken first)
+                                   // Both panics are caught and isolated; the normal sender is still woken, no abort.
+  let _ = catch_unwind(AssertUnwindSafe(|| chan.close()));
+  assert_eq!(cw.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn re_entrant_drop_cannot_repopulate_recv_waker_during_disconnect() {
+  use super::chan::Chan;
+  use core::task::{RawWaker, RawWakerVTable, Waker};
+
+  // A waker whose DROP re-registers a recv waker. When the last sender drops and
+  // wake_receiver drops this waker, register must be a no-op on the now-terminal channel.
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  unsafe fn vt_drop(p: *const ()) {
+    let chan = unsafe { &*(p as *const Chan<u32>) };
+    chan.register_recv_waker(&futures::task::noop_waker());
+  }
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_noop, vt_noop, vt_drop);
+
+  let chan = Chan::<u32>::bounded(1);
+  let reentrant = unsafe { Waker::from_raw(RawWaker::new(Rc::as_ptr(&chan) as *const (), &VT)) };
+  chan.register_recv_waker(&reentrant);
+  let tx = Sender::new(chan.clone());
+  drop(tx); // senders → 0; wake_receiver drops the stored waker, whose drop tries to re-register
+  assert!(!chan.recv_waker_registered()); // the terminal register was skipped
+}
+
+#[test]
+fn item_and_close_during_recv_registration_clears_the_waker() {
+  use super::chan::Chan;
+  use core::task::{RawWaker, RawWakerVTable, Waker};
+
+  // A raw waker whose CLONE pushes the final item AND closes the channel during
+  // registration. poll_recv's recheck then delivers the item via Ready(Some) — which skips
+  // clearing the waker — so register must not have stored one on the now-closed, drained
+  // channel.
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    let chan = unsafe { &*(p as *const Chan<u32>) };
+    let _ = chan.try_push(7); // Ignoring Err: the cap-1 channel is empty, the push succeeds
+    chan.close();
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_noop, vt_noop, vt_noop);
+
+  let chan = Chan::<u32>::bounded(1);
+  let reentrant = unsafe { Waker::from_raw(RawWaker::new(Rc::as_ptr(&chan) as *const (), &VT)) };
+  let mut rx = Receiver::new(chan.clone());
+  let mut fut = rx.recv();
+  assert_eq!(poll_once(&mut fut, &reentrant), Poll::Ready(Some(7)));
+  assert!(!chan.recv_waker_registered());
+}
+
+#[test]
+fn close_isolates_two_panicking_send_wakers() {
+  use super::chan::Chan;
+  use core::task::{RawWaker, RawWakerVTable, Waker};
+  use std::panic::{catch_unwind, AssertUnwindSafe};
+
+  // Two parked send wakers panic on wake. close() wakes them via wake_senders, which must
+  // isolate each panic (resume one only after draining the whole buffer) rather than
+  // double-panic into an abort, and still wake the normal sender between them.
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_wake(_: *const ()) {
+    panic!("send waker panics on wake");
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_wake, vt_wake, vt_noop);
+
+  let chan = Chan::<u32>::bounded(1);
+  chan.try_push(0).unwrap(); // full, so senders park
+  let panicking = unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VT)) };
+  let cw = Arc::new(CountingWaker(AtomicUsize::new(0)));
+  chan.add_send_waker(&panicking);
+  chan.add_send_waker(&waker(cw.clone())); // a normal sender, between the two panicking ones
+  chan.add_send_waker(&panicking);
+  let _ = catch_unwind(AssertUnwindSafe(|| chan.close()));
+  assert_eq!(cw.0.load(Ordering::SeqCst), 1); // the normal sender woke; no abort
+}
+
+#[test]
+fn close_forgets_toxic_panic_payloads_instead_of_aborting() {
+  use super::chan::Chan;
+  use core::task::{RawWaker, RawWakerVTable, Waker};
+  use std::panic::{catch_unwind, AssertUnwindSafe};
+
+  // A panic payload whose own Drop panics. Wakers raise it via panic_any, so close() catches
+  // payloads it must NOT drop — dropping one would double-panic into an abort. close() (and
+  // wake_senders) resume one and forget the rest; this test likewise forgets the resumed one.
+  struct PanicOnDrop;
+  impl Drop for PanicOnDrop {
+    fn drop(&mut self) {
+      panic!("toxic payload dropped");
+    }
+  }
+  unsafe fn vt_clone(p: *const ()) -> RawWaker {
+    RawWaker::new(p, &VT)
+  }
+  unsafe fn vt_wake(_: *const ()) {
+    std::panic::panic_any(PanicOnDrop);
+  }
+  unsafe fn vt_noop(_: *const ()) {}
+  static VT: RawWakerVTable = RawWakerVTable::new(vt_clone, vt_wake, vt_wake, vt_noop);
+
+  let chan = Chan::<u32>::bounded(1);
+  chan.try_push(0).unwrap(); // full, so senders park
+  let toxic = unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VT)) };
+  let cw = Arc::new(CountingWaker(AtomicUsize::new(0)));
+  chan.register_recv_waker(&toxic); // recv waker raising a toxic payload
+  chan.add_send_waker(&waker(cw.clone())); // a normal sender
+  chan.add_send_waker(&toxic); // a toxic sender
+  chan.add_send_waker(&toxic); // a second toxic sender (exercises wake_senders' secondary forget)
+                               // No abort; the normal sender is still woken. Forget the resumed payload here too.
+  if let Err(payload) = catch_unwind(AssertUnwindSafe(|| chan.close())) {
+    core::mem::forget(payload);
+  }
+  assert_eq!(cw.0.load(Ordering::SeqCst), 1);
+}
